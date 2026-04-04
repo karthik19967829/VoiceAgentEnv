@@ -741,6 +741,31 @@ def judge_correlation(ratings_dir: str, output: str | None):
         console.print(f"\n[green]Report saved to:[/green] {output}")
 
 
+@judge.command("serve")
+@click.option("--port", "-p", default=8910, help="Port to serve on")
+@click.option("--host", default="0.0.0.0", help="Host to bind to")
+@click.option("--ratings-dir", default="ratings", help="Directory for ratings data")
+@click.option("--demo", is_flag=True, help="Seed demo conversations for testing")
+def judge_serve(port: int, host: str, ratings_dir: str, demo: bool):
+    """Launch a web UI for community rating (grandma-friendly)."""
+    if demo:
+        from voiceenv.ui.demo_data import seed_demo_data
+        n = seed_demo_data(ratings_dir)
+        console.print(f"[green]Seeded {n} demo conversations.[/green]")
+
+    console.print(Panel(
+        f"[bold]Rating UI is starting![/bold]\n\n"
+        f"Open your browser to: [cyan underline]http://localhost:{port}[/cyan underline]\n\n"
+        f"Share this link with anyone — no login needed.\n"
+        f"Press Ctrl+C to stop.",
+        title="VoiceEnv Community Rating",
+        border_style="green",
+    ))
+
+    from voiceenv.ui.app import run_server
+    run_server(host=host, port=port, ratings_dir=ratings_dir)
+
+
 @judge.command("stats")
 @click.option("--ratings-dir", default="ratings", help="Directory for ratings data")
 def judge_stats(ratings_dir: str):

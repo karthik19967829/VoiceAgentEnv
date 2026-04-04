@@ -24,7 +24,8 @@ openenv = ["openenv-core"]
 prime = ["verifiers"]
 grounded-judge = ["google-genai>=1.0.0"]
 training = ["ms-swift"]
-all = ["voiceenv[openenv,prime,grounded-judge,training]"]
+ui = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+all = ["voiceenv[openenv,prime,grounded-judge,training,ui]"]
 
 [project.scripts]
 voiceenv = "voiceenv.cli.main:cli"

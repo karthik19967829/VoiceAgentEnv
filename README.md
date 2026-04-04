@@ -260,7 +260,29 @@ The critical question: *"Does the LLM judge agree with humans?"*
 
 VoiceEnv includes a full human-LLM correlation tracking system. Community members rate runs on the same criteria the judge uses, and we measure alignment.
 
-### Rating workflow
+### Web UI (grandma-friendly)
+
+The easiest way to participate — no coding required:
+
+```bash
+pip install -e ".[ui]"
+
+# Launch with demo conversations pre-loaded
+voiceenv judge serve --demo
+
+# Open http://localhost:8910 in your browser
+```
+
+The web UI lets anyone:
+1. **Enter their name** and start rating
+2. **Read conversations** between AI agents and callers
+3. **Rate each criterion** with emoji buttons (Bad → Great)
+4. **See comparison** between their rating and the AI judge
+5. **View the leaderboard** showing human-AI agreement per criterion
+
+Share the link with anyone — no login, no setup, no terminal needed.
+
+### CLI workflow (for power users)
 
 ```bash
 # 1. Save completed runs for community rating
@@ -366,6 +388,9 @@ voiceenv/
 ├── training/                      # THIN TRAINING LAYER
 │   ├── generate_rollouts.py       #   Generate training data (OUR code)
 │   └── launch.py                  #   Format data + invoke ms-swift (THEIR code)
+├── ui/                            # WEB UI FOR COMMUNITY RATING
+│   ├── app.py                     #   FastAPI server + single-page app
+│   └── demo_data.py               #   Demo conversations for first-time use
 └── cli/
     └── main.py                    #   CLI entry point
 ```
