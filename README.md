@@ -307,13 +307,11 @@ Low-correlation criteria get flagged — the community knows exactly where to ad
 
 ## Post-Training: One Command
 
-We don't implement training. We generate the data and reward signal, then hand off to battle-tested frameworks:
+We don't implement training. We generate the data and reward signal, then hand off to [ms-swift](https://github.com/modelscope/ms-swift) which has native Qwen3-Omni GRPO support.
 
-| Framework | Install | Best for |
-|-----------|---------|----------|
-| **[VERL](https://github.com/volcengine/verl)** | `pip install verl` | Production GRPO, custom reward functions, multi-GPU |
-| **[ms-swift](https://github.com/modelscope/ms-swift)** | `pip install ms-swift` | Qwen3-Omni native GRPO support |
-| **[TRL](https://github.com/huggingface/trl)** | `pip install trl` | Simple single-GPU experiments |
+```bash
+pip install ms-swift
+```
 
 ### Step 1: Generate rollouts (our code)
 
@@ -324,45 +322,21 @@ voiceenv train rollouts voiceenv/environments/ \
   --output rollouts.jsonl
 ```
 
-### Step 2: Post-train (their code, one command)
+### Step 2: Post-train (one command)
 
 ```bash
-# Option A: VERL — production GRPO with our reward function
-voiceenv train run -f verl -m Qwen/Qwen2.5-3B-Instruct -r rollouts.jsonl
-
-# Option B: ms-swift — native Qwen3-Omni support
-voiceenv train run -f ms-swift -m Qwen/Qwen3-Omni-30B-A3B-Instruct -r rollouts.jsonl
-
-# Option C: TRL — quick single-GPU experiment
-voiceenv train run -f trl -m Qwen/Qwen2.5-3B-Instruct -r rollouts.jsonl
+voiceenv train run -m Qwen/Qwen3-Omni-30B-A3B-Instruct -r rollouts.jsonl
 ```
+
+This formats the data and calls `swift rlhf --rlhf_type grpo` under the hood.
 
 ### Step 3: Evaluate and compare
 
 ```bash
-# Baseline eval
 voiceenv eval run -m gpt-4o-mini -n 10 -o baseline.json
-
-# Post-training eval
 voiceenv eval run -m ./voiceenv_trained -n 10 -o trained.json --base-url http://localhost:8000/v1
-
-# Compare
 voiceenv eval compare baseline.json trained.json
 ```
-
-### How the reward function works
-
-VoiceEnv provides a VERL-compatible reward function (`voiceenv/training/reward_function.py`) that plugs directly into VERL's custom reward system:
-
-```bash
-python3 -m verl.trainer.main_ppo \
-    algorithm.adv_estimator=grpo \
-    custom_reward_function.path=voiceenv/training/reward_function.py \
-    custom_reward_function.name=voiceenv_reward \
-    ...
-```
-
-The reward function runs our verifiable checks (state, tool calls, transcript patterns) — purely deterministic, no LLM calls, safe for RL.
 
 ## Project Structure
 
@@ -391,8 +365,7 @@ voiceenv/
 │   └── prime_exporter.py          #   → Prime Intellect
 ├── training/                      # THIN TRAINING LAYER
 │   ├── generate_rollouts.py       #   Generate training data (OUR code)
-│   ├── reward_function.py         #   VERL/TRL reward plugin (OUR code)
-│   └── launch.py                  #   Launch VERL/ms-swift/TRL (THEIR code)
+│   └── launch.py                  #   Format data + invoke ms-swift (THEIR code)
 └── cli/
     └── main.py                    #   CLI entry point
 ```

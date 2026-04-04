@@ -23,10 +23,8 @@ dependencies = [
 openenv = ["openenv-core"]
 prime = ["verifiers"]
 grounded-judge = ["google-genai>=1.0.0"]
-verl = ["verl"]
-swift = ["ms-swift"]
-trl = ["trl>=1.0", "peft", "transformers", "datasets", "accelerate", "torch"]
-all = ["voiceenv[openenv,prime,grounded-judge]"]
+training = ["ms-swift"]
+all = ["voiceenv[openenv,prime,grounded-judge,training]"]
 
 [project.scripts]
 voiceenv = "voiceenv.cli.main:cli"
