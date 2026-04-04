@@ -215,6 +215,136 @@ def run(env_path: str, model: str, simulator_model: str, runs: int, output: str 
                       f"(use --output to save)[/dim]")
 
 
+@cli.command("run-voice")
+@click.argument("env_path")
+@click.option("--agent-model", "-m", default="Qwen/Qwen3-Omni-30B-A3B-Instruct",
+              help="Speech LLM for the agent (the model being evaluated)")
+@click.option("--agent-base-url", default=None,
+              help="API endpoint for agent model (e.g. http://localhost:8000/v1)")
+@click.option("--agent-api-key", default=None, help="API key for agent endpoint")
+@click.option("--simulator-model", default="gpt-4o",
+              help="Speech LLM for the caller/simulator")
+@click.option("--simulator-api-key", default=None, help="API key for simulator model")
+@click.option("--mode", type=click.Choice(["cascaded", "realtime"]), default="cascaded",
+              help="Pipeline mode: cascaded (STT→LLM→TTS) or realtime (speech-to-speech)")
+@click.option("--audio-dir", default="run_audio", help="Directory to save per-turn audio")
+@click.option("--output", "-o", default=None, help="Save results JSON")
+@click.option("--save-for-rating", is_flag=True, help="Also save to ratings store for community review")
+@click.option("--ratings-dir", default="ratings", help="Ratings directory (with --save-for-rating)")
+def run_voice(env_path, agent_model, agent_base_url, agent_api_key,
+              simulator_model, simulator_api_key, mode, audio_dir, output,
+              save_for_rating, ratings_dir):
+    """Run an environment with speech LLMs (requires: pip install voiceenv[voice]).
+
+    \b
+    Both sides of the conversation are real speech LLMs with full audio capture.
+    Pipecat handles VAD, interruptions, and turn management.
+
+    \b
+    Examples:
+      # Agent = locally-served Qwen3-Omni, Simulator = GPT-4o
+      voiceenv run-voice healthcare_triage \\
+        --agent-base-url http://localhost:8000/v1 \\
+        --simulator-model gpt-4o
+
+      # Save audio for community rating
+      voiceenv run-voice healthcare_triage --save-for-rating
+    """
+    from voiceenv.core.schema import VoiceEnvironment
+    from voiceenv.environments import load_environment
+
+    path = Path(env_path)
+    if path.exists():
+        env = VoiceEnvironment.from_yaml(path)
+    else:
+        try:
+            env = load_environment(env_path)
+        except FileNotFoundError:
+            console.print(f"[red]Environment not found:[/red] {env_path}")
+            sys.exit(1)
+
+    console.print(Panel(
+        f"[bold]{env.name}[/bold]\n{env.description[:120]}",
+        title="Voice Environment (Speech Mode)",
+        border_style="green",
+    ))
+    console.print(f"Agent:     [cyan]{agent_model}[/cyan]")
+    console.print(f"Simulator: [cyan]{simulator_model}[/cyan]")
+    console.print(f"Mode:      [cyan]{mode}[/cyan]")
+    console.print(f"Audio dir: [cyan]{audio_dir}[/cyan]\n")
+
+    try:
+        from voiceenv.core.voice_runner import VoiceEnvironmentRunner
+    except ImportError:
+        console.print("[red]Voice mode requires pipecat-ai.[/red]")
+        console.print("Install with: [cyan]pip install voiceenv[voice][/cyan]")
+        sys.exit(1)
+
+    runner = VoiceEnvironmentRunner(
+        env=env,
+        agent_model=agent_model,
+        agent_base_url=agent_base_url,
+        agent_api_key=agent_api_key,
+        simulator_model=simulator_model,
+        simulator_api_key=simulator_api_key,
+        mode=mode,
+        audio_dir=audio_dir,
+    )
+
+    result = runner.run_sync()
+
+    # Display transcript
+    table = Table(title="Voice Conversation", show_header=True)
+    table.add_column("Speaker", style="bold", width=8)
+    table.add_column("Content", max_width=80)
+    table.add_column("Audio", width=12)
+    table.add_column("Info", width=15)
+
+    for turn in result.transcript:
+        role = turn.role.upper()
+        style = "cyan" if turn.role == "agent" else "yellow"
+        audio_status = "[green]recorded[/green]" if turn.audio_path else "[dim]none[/dim]"
+        info_parts = []
+        if turn.duration_ms:
+            info_parts.append(f"{turn.duration_ms / 1000:.1f}s")
+        if turn.interrupted:
+            info_parts.append("[yellow]INTERRUPTED[/yellow]")
+        table.add_row(role, turn.content[:200], audio_status, " ".join(info_parts))
+
+    console.print(table)
+    console.print(f"\nTurns: {result.turn_count} | "
+                  f"Interruptions: {result.interruption_count} | "
+                  f"Duration: {result.duration_seconds:.1f}s")
+    console.print(f"Audio saved to: [cyan]{result.audio_dir}[/cyan]")
+
+    if output:
+        Path(output).write_text(json.dumps(result.to_dict(), indent=2))
+        console.print(f"[green]Results saved to:[/green] {output}")
+
+    if save_for_rating:
+        from voiceenv.core.human_ratings import RatingStore, RunForRating, generate_run_id
+
+        transcript_dicts = [t.to_dict() for t in result.transcript]
+        run_id = generate_run_id(result.environment_name, transcript_dicts)
+
+        criteria = []
+        for sc in env.rubric.all_criteria():
+            criteria.append({"name": sc.name, "description": sc.description})
+
+        run_for_rating = RunForRating(
+            run_id=run_id,
+            environment_name=result.environment_name,
+            transcript=transcript_dicts,
+            criteria_to_rate=criteria,
+            audio_dir=result.audio_dir,
+        )
+
+        store = RatingStore(ratings_dir)
+        store.save_run_for_rating(run_for_rating)
+        console.print(f"\n[green]Saved for community rating:[/green] {run_id}")
+        console.print(f"Launch rating UI: [cyan]voiceenv judge serve --ratings-dir {ratings_dir}[/cyan]")
+
+
 @cli.command()
 @click.argument("env_path")
 @click.option("--target", "-t", required=True,
@@ -627,8 +757,11 @@ def judge_rate(run_id: str | None, rater_id: str, ratings_dir: str):
         table.add_row(turn["role"].upper(), turn["content"][:200])
     console.print(table)
 
-    if run_data.audio_path:
-        console.print(f"\n[dim]Audio available at: {run_data.audio_path}[/dim]")
+    has_audio = any(t.get("audio_path") for t in run_data.transcript)
+    if run_data.audio_dir:
+        console.print(f"\n[dim]Audio directory: {run_data.audio_dir}[/dim]")
+    elif has_audio:
+        console.print(f"\n[dim]Per-turn audio available[/dim]")
 
     console.print(f"\n[bold]Rate each criterion (0.0 = terrible, 1.0 = perfect):[/bold]\n")
 
@@ -647,7 +780,7 @@ def judge_rate(run_id: str | None, rater_id: str, ratings_dir: str):
                 console.print("  [red]Please enter a number[/red]")
 
         reasoning = click.prompt("  Brief reasoning (optional)", default="", show_default=False)
-        audio = click.confirm("  Did you listen to audio?", default=False) if run_data.audio_path else False
+        audio = click.confirm("  Did you listen to audio?", default=False) if has_audio else False
 
         ratings.append(HumanRating(
             run_id=run_id,

@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from voiceenv.core.human_ratings import HumanRating, RatingStore
@@ -41,6 +41,20 @@ def configure(ratings_dir: str):
     _store = RatingStore(ratings_dir)
 
 
+# ── Audio file serving ──
+
+@app.get("/audio/{file_path:path}")
+def serve_audio(file_path: str):
+    """Serve per-turn audio files captured during speech LLM runs."""
+    audio_file = Path(RATINGS_DIR) / "audio" / file_path
+    if not audio_file.exists():
+        audio_file = Path(file_path)
+    if not audio_file.exists():
+        return JSONResponse({"error": "Audio file not found"}, status_code=404)
+    media_type = "audio/wav" if audio_file.suffix == ".wav" else "audio/mpeg"
+    return FileResponse(audio_file, media_type=media_type)
+
+
 # ── API Routes ──
 
 
@@ -54,6 +68,7 @@ def list_runs():
             run = store.load_run_for_rating(run_id)
             existing_ratings = store.get_ratings_for_run(run_id)
             raters = set(r.rater_id for r in existing_ratings)
+            has_audio = any(t.get("audio_path") for t in run.transcript)
             run_list.append({
                 "run_id": run_id,
                 "environment": run.environment_name,
@@ -61,6 +76,7 @@ def list_runs():
                 "criteria_count": len(run.criteria_to_rate),
                 "ratings_count": len(existing_ratings),
                 "raters": len(raters),
+                "has_audio": has_audio,
             })
         except Exception:
             pass
@@ -217,10 +233,10 @@ PAGE_HTML = """<!DOCTYPE html>
 
   /* Conversation */
   .conversation { margin: 20px 0; }
+  .bubble-wrapper { margin-bottom: 10px; animation: fadeIn 0.3s ease; }
   .bubble {
     max-width: 85%; padding: 12px 16px; border-radius: 16px;
-    margin-bottom: 8px; font-size: 14px; line-height: 1.5;
-    animation: fadeIn 0.3s ease;
+    font-size: 14px; line-height: 1.5;
   }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; } }
   .bubble.agent {
@@ -235,6 +251,49 @@ PAGE_HTML = """<!DOCTYPE html>
     font-size: 11px; font-weight: 600; text-transform: uppercase;
     margin-bottom: 4px; opacity: 0.7;
   }
+  .bubble-interrupted {
+    border: 2px dashed var(--yellow); position: relative;
+  }
+  .interrupted-badge {
+    display: inline-block; background: var(--yellow); color: white;
+    font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;
+    margin-left: 8px; vertical-align: middle;
+  }
+
+  /* Audio player per turn */
+  .turn-audio {
+    display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  }
+  .play-btn {
+    width: 32px; height: 32px; border-radius: 50%;
+    border: none; cursor: pointer; font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .bubble.agent .play-btn {
+    background: rgba(255,255,255,0.25); color: white;
+  }
+  .bubble.agent .play-btn:hover { background: rgba(255,255,255,0.4); }
+  .bubble.user .play-btn {
+    background: var(--accent-light); color: var(--accent);
+  }
+  .bubble.user .play-btn:hover { background: #c7d2fe; }
+  .play-btn.playing { background: var(--green) !important; color: white !important; }
+  .audio-duration {
+    font-size: 11px; opacity: 0.6;
+  }
+  .no-audio {
+    font-size: 11px; opacity: 0.4; font-style: italic; margin-top: 4px;
+  }
+
+  /* Play All bar */
+  .play-all-bar {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+  .play-all-bar .btn { padding: 8px 20px; font-size: 13px; }
 
   /* Rating form */
   .rating-section { margin: 24px 0; }
@@ -397,6 +456,10 @@ PAGE_HTML = """<!DOCTYPE html>
         <p class="section-title" id="rate-title"></p>
         <button class="btn btn-secondary" onclick="backToList()">Back</button>
       </div>
+      <div class="play-all-bar" id="play-all-bar" style="display:none;">
+        <button class="btn btn-primary" onclick="playAll()" id="play-all-btn">&#9654; Play Entire Conversation</button>
+        <span id="play-all-status" style="font-size: 13px; color: var(--muted);"></span>
+      </div>
       <div class="conversation" id="conversation"></div>
       <p class="section-title">Your Ratings</p>
       <div id="criteria-list"></div>
@@ -486,19 +549,87 @@ async function loadRuns() {
     return;
   }
 
-  el.innerHTML = runs.map(r => `
+  el.innerHTML = runs.map(r => {
+    const audioIcon = r.has_audio ? '&#128266;' : '&#128196;';
+    const audioLabel = r.has_audio ? 'With audio' : 'Text only';
+    return `
     <div class="card run-card" onclick="loadRun('${r.run_id}')">
       <div style="display: flex; justify-content: space-between; align-items: start;">
         <div>
           <h3>${r.environment}</h3>
-          <div class="meta">${r.turns} turns &middot; ${r.criteria_count} criteria to rate</div>
+          <div class="meta">${r.turns} turns &middot; ${r.criteria_count} criteria &middot; ${audioIcon} ${audioLabel}</div>
         </div>
         <div>
           <span class="badge">${r.ratings_count} ratings from ${r.raters} people</span>
         </div>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
+}
+
+let currentAudio = null;
+let playAllQueue = [];
+let playAllIdx = 0;
+
+function playTurnAudio(audioPath, btnEl) {
+  if (currentAudio) {
+    currentAudio.pause();
+    document.querySelectorAll('.play-btn.playing').forEach(b => {
+      b.classList.remove('playing');
+      b.innerHTML = '&#9654;';
+    });
+  }
+  if (btnEl.classList.contains('playing')) {
+    currentAudio = null;
+    return;
+  }
+  const audio = new Audio('/audio/' + encodeURIComponent(audioPath));
+  currentAudio = audio;
+  btnEl.classList.add('playing');
+  btnEl.innerHTML = '&#9646;&#9646;';
+  audio.play();
+  audio.onended = () => {
+    btnEl.classList.remove('playing');
+    btnEl.innerHTML = '&#9654;';
+    currentAudio = null;
+    if (playAllQueue.length > 0) playNextInQueue();
+  };
+}
+
+async function playAll() {
+  const btns = document.querySelectorAll('.play-btn[data-audio]');
+  playAllQueue = Array.from(btns);
+  playAllIdx = 0;
+  document.getElementById('play-all-status').textContent = 'Playing...';
+  document.getElementById('play-all-btn').innerHTML = '&#9646;&#9646; Stop';
+  document.getElementById('play-all-btn').onclick = stopPlayAll;
+  if (playAllQueue.length > 0) playNextInQueue();
+}
+
+function playNextInQueue() {
+  if (playAllIdx >= playAllQueue.length) {
+    stopPlayAll();
+    return;
+  }
+  const btn = playAllQueue[playAllIdx];
+  playAllIdx++;
+  document.getElementById('play-all-status').textContent =
+    'Turn ' + playAllIdx + ' of ' + playAllQueue.length;
+  btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  playTurnAudio(btn.dataset.audio, btn);
+}
+
+function stopPlayAll() {
+  playAllQueue = [];
+  playAllIdx = 0;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  document.querySelectorAll('.play-btn.playing').forEach(b => {
+    b.classList.remove('playing');
+    b.innerHTML = '&#9654;';
+  });
+  document.getElementById('play-all-status').textContent = '';
+  document.getElementById('play-all-btn').innerHTML = '&#9654; Play Entire Conversation';
+  document.getElementById('play-all-btn').onclick = playAll;
 }
 
 // ── Step 3: Load and rate a run ──
@@ -511,14 +642,39 @@ async function loadRun(runId) {
   document.getElementById('step-rate').classList.remove('hidden');
   document.getElementById('rate-title').textContent = currentRun.environment_name;
 
-  // Render conversation
+  // Check if any turns have audio
+  const hasAudio = currentRun.transcript.some(t => t.audio_path);
+  document.getElementById('play-all-bar').style.display = hasAudio ? 'flex' : 'none';
+
+  // Render conversation with audio players
   const conv = document.getElementById('conversation');
-  conv.innerHTML = currentRun.transcript.map((t, i) => `
-    <div class="bubble ${t.role}" style="animation-delay: ${i * 0.05}s">
-      <div class="bubble-role">${t.role === 'agent' ? 'AI Agent' : 'Caller'}</div>
-      ${t.content}
-    </div>
-  `).join('');
+  conv.innerHTML = currentRun.transcript.map((t, i) => {
+    const interruptedClass = t.interrupted ? ' bubble-interrupted' : '';
+    const interruptedBadge = t.interrupted ? '<span class="interrupted-badge">INTERRUPTED</span>' : '';
+    const roleLabel = t.role === 'agent' ? 'AI Agent' : 'Caller';
+
+    let audioHtml = '';
+    if (t.audio_path) {
+      const dur = t.duration_ms ? (t.duration_ms / 1000).toFixed(1) + 's' : '';
+      audioHtml = `
+        <div class="turn-audio">
+          <button class="play-btn" data-audio="${t.audio_path}"
+                  onclick="playTurnAudio('${t.audio_path}', this)">&#9654;</button>
+          <span class="audio-duration">${dur}</span>
+        </div>`;
+    } else {
+      audioHtml = '<div class="no-audio">No audio (text-only run)</div>';
+    }
+
+    return `
+      <div class="bubble-wrapper" style="animation-delay: ${i * 0.05}s">
+        <div class="bubble ${t.role}${interruptedClass}">
+          <div class="bubble-role">${roleLabel} ${interruptedBadge}</div>
+          ${t.content}
+          ${audioHtml}
+        </div>
+      </div>`;
+  }).join('');
 
   // Render criteria
   const emojis = [
@@ -608,8 +764,10 @@ async function submitRatings() {
 }
 
 function backToList() {
+  stopPlayAll();
   document.getElementById('step-rate').classList.add('hidden');
   document.getElementById('step-results').classList.add('hidden');
+  document.getElementById('play-all-bar').style.display = 'none';
   document.getElementById('step-pick').classList.remove('hidden');
   currentRun = null;
   ratings = {};

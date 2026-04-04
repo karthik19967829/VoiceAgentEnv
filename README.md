@@ -71,8 +71,14 @@ VoiceEnv fills this by providing:
 ```bash
 pip install -e .
 
+# With voice mode (Pipecat + edge-tts for speech LLM conversations)
+pip install -e ".[voice]"
+
 # With grounded judge (Gemini)
 pip install -e ".[grounded-judge]"
+
+# With rating UI
+pip install -e ".[ui]"
 
 # With training pipeline
 pip install -e ".[training]"
@@ -126,6 +132,30 @@ voiceenv benchmark voiceenv/environments/ \
   --model gpt-4o --model gpt-4o-mini --model claude-sonnet-4-20250514 \
   -n 5 --output leaderboard.json
 ```
+
+### Run with speech LLMs (voice mode)
+
+Both sides of the conversation are real speech LLMs. Pipecat handles the audio pipeline, VAD, interruptions, and per-turn audio recording.
+
+```bash
+pip install -e ".[voice]"
+
+# Serve Qwen3-Omni locally (via ms-swift)
+swift deploy --model Qwen/Qwen3-Omni-30B-A3B-Instruct
+
+# Run: Agent = Qwen3-Omni, Simulator = GPT-4o
+voiceenv run-voice healthcare_triage \
+  --agent-model Qwen/Qwen3-Omni-30B-A3B-Instruct \
+  --agent-base-url http://localhost:8000/v1 \
+  --simulator-model gpt-4o \
+  --save-for-rating
+
+# Audio from both speakers saved per-turn in run_audio/
+# Then launch the rating UI so people can listen and rate:
+voiceenv judge serve
+```
+
+The `--save-for-rating` flag packages the run with all per-turn audio for community review. Raters hear the **actual speech LLM output** — not synthetic TTS — so they're evaluating real model quality (tone, pacing, empathy, interruption handling).
 
 ### Export to environment hubs
 
@@ -369,7 +399,8 @@ voiceenv/
 │   ├── simulator.py               #   LLM-backed user simulator
 │   ├── sandbox.py                 #   Tool execution & world state
 │   ├── scorer.py                  #   Verifiable + soft + grounded scoring
-│   ├── runner.py                  #   End-to-end environment runner
+│   ├── runner.py                  #   Text-mode environment runner
+│   ├── voice_runner.py            #   Speech LLM runner (Pipecat)
 │   ├── grounded_judge.py          #   Gemini multimodal judge
 │   ├── human_ratings.py           #   Community rating collection
 │   └── judge_correlation.py       #   Human-LLM correlation tracking

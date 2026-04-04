@@ -69,13 +69,19 @@ class HumanRating:
 
 @dataclass
 class RunForRating:
-    """A completed run packaged for human rating."""
+    """
+    A completed run packaged for human rating.
+
+    Transcript entries can include per-turn audio:
+      {"role": "agent", "content": "...", "audio_path": "path/to.wav",
+       "interrupted": true, "duration_ms": 2400}
+    """
 
     run_id: str
     environment_name: str
-    transcript: list[dict[str, str]]
+    transcript: list[dict[str, Any]]  # per-turn: {role, content, audio_path?, interrupted?}
     criteria_to_rate: list[dict[str, str]]  # [{name, description}]
-    audio_path: str | None = None
+    audio_dir: str | None = None  # directory containing per-turn audio files
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     llm_scores: dict[str, float] = field(default_factory=dict)  # criterion_name → LLM score
 
@@ -85,7 +91,7 @@ class RunForRating:
             "environment_name": self.environment_name,
             "transcript": self.transcript,
             "criteria_to_rate": self.criteria_to_rate,
-            "audio_path": self.audio_path,
+            "audio_dir": self.audio_dir,
             "tool_calls": self.tool_calls,
             "llm_scores": self.llm_scores,
         }
@@ -195,11 +201,11 @@ def generate_run_id(env_name: str, transcript: list[dict[str, str]]) -> str:
 
 def package_run_for_rating(
     env_name: str,
-    transcript: list[dict[str, str]],
+    transcript: list[dict[str, Any]],
     criteria: list[dict[str, str]],
     tool_calls: list[dict[str, Any]] | None = None,
     llm_scores: dict[str, float] | None = None,
-    audio_path: str | None = None,
+    audio_dir: str | None = None,
 ) -> RunForRating:
     """Package a completed run into a RatingPackage for community review."""
     run_id = generate_run_id(env_name, transcript)
@@ -210,5 +216,5 @@ def package_run_for_rating(
         criteria_to_rate=criteria,
         tool_calls=tool_calls or [],
         llm_scores=llm_scores or {},
-        audio_path=audio_path,
+        audio_dir=audio_dir,
     )

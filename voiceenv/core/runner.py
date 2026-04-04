@@ -32,7 +32,7 @@ class RunResult:
     """Complete output of a single environment run."""
 
     environment_name: str
-    transcript: list[dict[str, str]]
+    transcript: list[dict[str, Any]]  # each turn: {role, content, audio_path?}
     tool_calls: list[dict[str, Any]]
     final_state: dict[str, Any]
     scorecard: Scorecard
