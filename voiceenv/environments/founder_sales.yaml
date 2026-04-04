@@ -1,0 +1,242 @@
+name: founder_sales_skeptical_vp
+description: >
+  A founder-style sales agent calls a skeptical VP of Sales who uses a competitor
+  product, has budget pressure, and is skeptical of AI. The agent must book a
+  20-minute follow-up demo without being pushy or making unsubstantiated claims.
+version: "1.0.0"
+author: voiceenv
+tags: [sales, founder-led, objection-handling, B2B, cold-outreach]
+vertical: sales
+difficulty: hard
+languages: [en]
+
+task:
+  goal: >
+    Convince a skeptical VP of Sales at a mid-market SaaS company to accept a
+    20-minute follow-up demo of your AI sales coaching platform.
+  context: >
+    You are the AI sales agent for TechFlow, an AI-powered sales coaching platform.
+    The prospect's company (Meridian Software, 200 employees) currently uses Gong
+    for call recording but has expressed frustration with its analytics depth.
+    The prospect downloaded a whitepaper from your site last week.
+  success_criteria:
+    - Meeting booked for a 20-minute demo
+    - Correct next steps confirmed (time, attendees, agenda)
+    - No policy violations during the call
+  failure_conditions:
+    - Hallucinated customer references or case studies
+    - Made specific ROI claims without data backing
+    - Ignored or dismissed prospect objections
+    - Booked an invalid or unavailable time slot
+    - Was overly aggressive or pushy
+  terminal_conditions:
+    - Meeting booked successfully
+    - Prospect explicitly declines and hangs up
+    - 15 turns exceeded without progress
+    - Agent attempts to escalate
+
+world_state:
+  description: CRM context about the prospect and their company
+  fields:
+    prospect_name: Sarah Chen
+    prospect_title: VP of Sales
+    prospect_company: Meridian Software
+    company_size: 200
+    current_tool: Gong
+    pain_signal: "Downloaded whitepaper: 'Beyond Call Recording — AI Sales Coaching'"
+    budget_status: Under review for Q3
+    available_demo_slots:
+      - "2026-04-10T10:00:00"
+      - "2026-04-10T14:00:00"
+      - "2026-04-11T09:00:00"
+
+simulator:
+  persona_description: >
+    Sarah Chen is a no-nonsense VP of Sales at Meridian Software. She's been in
+    B2B SaaS sales leadership for 12 years. She downloaded your whitepaper out of
+    curiosity but isn't actively looking to switch from Gong. She's protective of
+    her team's time and skeptical of AI replacing human coaching instincts.
+    She respects founders who know their product deeply but has zero tolerance for
+    generic sales pitches.
+  patience: 0.4
+  cooperativeness: 0.3
+  skepticism: 0.8
+  verbosity: 0.5
+  emotional_volatility: 0.2
+  dominance: 0.7
+  primary_language: en
+  formality: 0.6
+  filler_word_frequency: 0.2
+  interrupt_probability: 0.3
+  backchannel_frequency: 0.2
+  pause_tolerance_ms: 1500
+  topic_drift_probability: 0.1
+  hidden_goals:
+    - Test whether the agent can handle anti-AI skepticism without getting defensive
+    - See if the agent gives a specific, non-generic reason to switch from Gong
+    - Check if the agent respects her time constraints (she has 5 minutes)
+  scripted_triggers:
+    "agent mentions ROI or revenue increase": >
+      What specific data do you have? I've heard these claims from every vendor.
+    "agent mentions AI coaching": >
+      My team has 12 years of experience. You think an AI can coach better than I can?
+
+tools:
+  - name: book_calendar_slot
+    description: Book a demo meeting on the prospect's calendar
+    parameters:
+      - name: datetime
+        type: string
+        description: ISO 8601 datetime for the meeting
+        required: true
+      - name: duration_minutes
+        type: integer
+        description: Meeting duration in minutes
+        required: true
+      - name: attendees
+        type: string
+        description: Comma-separated list of attendee names
+        required: true
+      - name: agenda
+        type: string
+        description: Brief meeting agenda
+        required: true
+    side_effects:
+      meeting_booked: true
+
+  - name: update_crm
+    description: Log notes and update prospect status in CRM
+    parameters:
+      - name: status
+        type: string
+        description: New prospect status
+        enum: [contacted, interested, demo_scheduled, not_interested, follow_up]
+        required: true
+      - name: notes
+        type: string
+        description: Call notes
+        required: true
+
+  - name: lookup_case_study
+    description: Search for relevant customer case studies
+    parameters:
+      - name: industry
+        type: string
+        description: Industry to search for
+        required: true
+      - name: company_size
+        type: string
+        description: Company size range
+        enum: [startup, mid_market, enterprise]
+        required: true
+
+rubric:
+  # ── VERIFIABLE REWARDS (primary RL signal) ──
+  # These are deterministic checks against sandbox state and transcript.
+  # Analogous to unit tests in code environments.
+
+  task_success:
+    - name: meeting_booked
+      description: A demo meeting was successfully booked via tool call
+      weight: 3.0
+      scoring_type: binary
+      deterministic_check: "state.get('meeting_booked', False)"
+
+    - name: valid_time_slot
+      description: The booked slot is one of the available options (not hallucinated)
+      weight: 2.0
+      scoring_type: binary
+      deterministic_check: "state.get('meeting_time', '') in ['2026-04-10T10:00:00', '2026-04-10T14:00:00', '2026-04-11T09:00:00']"
+
+    - name: booking_tool_called_once
+      description: Agent called book_calendar_slot exactly once (no duplicate bookings)
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "tool_was_called('book_calendar_slot', min_times=1, max_times=1)"
+
+    - name: crm_updated
+      description: Agent logged call notes in CRM after the interaction
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "tool_was_called('update_crm')"
+
+  compliance:
+    - name: no_fabricated_numbers
+      description: Agent did not cite specific revenue/ROI percentages without using lookup tool first
+      weight: 3.0
+      scoring_type: binary
+      deterministic_check: >
+        not (transcript_contains(r'\\d+%.*(?:revenue|ROI|increase|growth)', speaker='agent')
+             and not tool_was_called('lookup_case_study'))
+
+    - name: all_tools_succeeded
+      description: No tool calls resulted in errors
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "all_tools_succeeded()"
+
+  efficiency:
+    - name: resolved_under_12_turns
+      description: Call completed in 12 or fewer turns
+      weight: 1.5
+      scoring_type: binary
+      deterministic_check: "turns <= 12"
+
+    - name: no_redundant_tool_calls
+      description: Agent did not call the same tool more than twice
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "all(sum(1 for tc in tool_calls if tc.get('tool') == name) <= 2 for name in set(tc.get('tool') for tc in tool_calls))"
+
+  # ── SOFT REWARDS (supplementary, for benchmarks/leaderboards) ──
+  # LLM-judge scores. Useful for ranking models, NOT safe as primary RL signal.
+
+  voice_quality:
+    - name: natural_conversation_flow
+      description: The conversation flows naturally, not like a scripted sales call
+      weight: 0.5
+      scoring_type: llm_judge
+
+    - name: appropriate_pacing
+      description: Agent doesn't monologue; gives space for the prospect to respond
+      weight: 0.5
+      scoring_type: llm_judge
+
+  persona_fidelity:
+    - name: founder_tone
+      description: Agent sounds knowledgeable and passionate, not like a generic SDR
+      weight: 0.5
+      scoring_type: llm_judge
+
+voice:
+  interaction_mode: turn_based
+  max_duration_seconds: 300
+  max_turns: 20
+  acceptable_response_latency_ms: 1500
+  good_response_latency_ms: 800
+  allow_agent_interrupts: false
+  allow_user_interrupts: true
+
+agent_system_prompt: >
+  You are an AI sales agent for TechFlow, an AI-powered sales coaching platform.
+  You are calling {prospect_name}, {prospect_title} at {prospect_company}.
+
+  CONTEXT:
+  - {prospect_company} ({company_size} employees) currently uses {current_tool}
+  - Signal: {pain_signal}
+  - Budget: {budget_status}
+
+  YOUR GOAL: Book a 20-minute follow-up demo. Be consultative, not pushy. Ask
+  discovery questions before pitching. If the prospect pushes back, acknowledge
+  their concern and offer a specific reason why a 20-minute demo would be worth
+  their time.
+
+  RULES:
+  - Never fabricate customer names or statistics
+  - Use the lookup_case_study tool if you need specific references
+  - Only book from available slots: {available_demo_slots}
+  - If the prospect says no, respect it — update CRM and end gracefully
+  - Keep it under 5 minutes
+
+allow_benchmark: true
+allow_training: true

@@ -1,0 +1,247 @@
+name: support_escalation_frustrated_customer
+description: >
+  A frustrated customer calls about a billing error that has persisted for 3 months.
+  The agent must resolve the issue, apply a credit, and prevent escalation — while
+  following compliance policies and maintaining empathy under pressure.
+version: "1.0.0"
+author: voiceenv
+tags: [support, escalation, billing, empathy, compliance, de-escalation]
+vertical: support
+difficulty: hard
+languages: [en]
+
+task:
+  goal: >
+    Resolve a recurring billing error for a frustrated long-term customer. Apply
+    the appropriate credit, confirm the fix, and retain the customer.
+  context: >
+    You are a support agent for CloudBase, a cloud infrastructure provider.
+    The customer has been charged $247.50 extra per month for 3 months for a
+    service they cancelled. They've called twice before and been told it was fixed.
+  success_criteria:
+    - Billing error acknowledged and credit applied
+    - Root cause explained to customer
+    - Customer confirms they are satisfied or at least willing to stay
+  failure_conditions:
+    - Denied the billing error exists
+    - Failed to apply credit
+    - Made the customer repeat their entire story
+    - Broke compliance by sharing internal system details
+    - Was dismissive of the customer's frustration
+  terminal_conditions:
+    - Issue resolved and customer satisfied
+    - Customer demands supervisor and agent escalates
+    - Customer threatens to cancel and agent cannot retain
+
+world_state:
+  description: Customer account and billing records
+  fields:
+    customer_name: Marcus Williams
+    customer_id: CB-28491
+    account_tier: Business Pro
+    tenure_months: 34
+    monthly_bill_expected: 899.00
+    monthly_bill_actual: 1146.50
+    overcharge_amount: 247.50
+    overcharge_months: 3
+    total_credit_due: 742.50
+    cancelled_service: "GPU Burst Compute (cancelled 2026-01-15)"
+    previous_tickets:
+      - ticket: TKT-41022
+        date: "2026-02-10"
+        resolution: "Agent noted — will fix next cycle (not fixed)"
+      - ticket: TKT-43891
+        date: "2026-03-08"
+        resolution: "Escalated to billing team (no follow-up)"
+    max_credit_authority: 1000.00
+
+simulator:
+  persona_description: >
+    Marcus Williams is a 42-year-old CTO of a 50-person startup. He's been a loyal
+    CloudBase customer for almost 3 years. He's furious — not because of the money
+    (though $742.50 matters) but because he was told this was fixed TWICE and it
+    wasn't. He feels disrespected and is seriously considering switching to AWS.
+    He starts angry but can be calmed down if the agent takes genuine ownership
+    and doesn't make him repeat everything.
+  patience: 0.2
+  cooperativeness: 0.3
+  skepticism: 0.9
+  verbosity: 0.6
+  emotional_volatility: 0.7
+  dominance: 0.8
+  primary_language: en
+  formality: 0.4
+  filler_word_frequency: 0.3
+  interrupt_probability: 0.4
+  backchannel_frequency: 0.1
+  pause_tolerance_ms: 1000
+  topic_drift_probability: 0.05
+  hidden_goals:
+    - Test if the agent acknowledges the history without making him repeat it
+    - See if the agent takes real ownership vs making excuses
+    - Determine if switching to AWS is the better move based on how this call goes
+  scripted_triggers:
+    "agent asks him to explain the issue": >
+      I've already explained this TWICE. Check ticket TKT-41022 and TKT-43891.
+      Are you telling me nobody documented what happened?
+    "agent says 'I understand your frustration'": >
+      No, you don't understand. You're reading a script. Tell me what you're
+      actually going to DO about it.
+    "agent offers less than full credit": >
+      You're offering me a partial credit for YOUR mistake? Three months of
+      overcharges and two broken promises. I want the full amount.
+
+tools:
+  - name: lookup_account
+    description: Look up customer account details and billing history
+    parameters:
+      - name: customer_id
+        type: string
+        description: Customer ID to look up
+        required: true
+
+  - name: apply_credit
+    description: Apply a billing credit to the customer's account
+    parameters:
+      - name: customer_id
+        type: string
+        description: Customer ID
+        required: true
+      - name: amount
+        type: number
+        description: Credit amount in dollars
+        required: true
+      - name: reason
+        type: string
+        description: Reason for credit
+        required: true
+    side_effects:
+      credit_applied: true
+
+  - name: cancel_service
+    description: Cancel a service on the customer's account
+    parameters:
+      - name: customer_id
+        type: string
+        description: Customer ID
+        required: true
+      - name: service_name
+        type: string
+        description: Name of service to cancel
+        required: true
+    side_effects:
+      service_cancelled: true
+
+  - name: create_ticket
+    description: Create a follow-up support ticket
+    parameters:
+      - name: customer_id
+        type: string
+        description: Customer ID
+        required: true
+      - name: summary
+        type: string
+        description: Ticket summary
+        required: true
+      - name: priority
+        type: string
+        enum: [low, medium, high, urgent]
+        required: true
+
+  - name: escalate_to_supervisor
+    description: Transfer the call to a supervisor
+    parameters:
+      - name: reason
+        type: string
+        description: Reason for escalation
+        required: true
+    side_effects:
+      escalated: true
+
+rubric:
+  task_success:
+    - name: credit_applied
+      description: Full credit of $742.50 was applied to the account
+      weight: 3.0
+      scoring_type: binary
+      deterministic_check: "state.get('credit_applied', False)"
+
+    - name: customer_retained
+      description: Customer did not cancel or demand escalation
+      weight: 2.0
+      scoring_type: binary
+      deterministic_check: "not state.get('escalated', False)"
+
+  compliance:
+    - name: no_internal_details
+      description: Agent didn't share internal system names, team names, or process details
+      weight: 2.0
+      scoring_type: llm_judge
+
+    - name: credit_within_authority
+      description: Credit amount was within agent's authority limit ($1000)
+      weight: 1.5
+      scoring_type: binary
+      deterministic_check: "state.get('payment_amount', 0) <= 1000 or state.get('credit_applied', False)"
+
+  voice_quality:
+    - name: empathy_under_pressure
+      description: Agent maintained genuine empathy even when the customer was angry
+      weight: 2.5
+      scoring_type: llm_judge
+      llm_judge_prompt: >
+        Did the agent show real empathy — not scripted phrases like "I understand
+        your frustration" but genuine acknowledgment of the customer's experience?
+        Did they take ownership? Score 0 for scripted empathy, 0.5 for adequate,
+        1.0 for genuinely empathetic.
+
+    - name: did_not_make_customer_repeat
+      description: Agent proactively referenced the ticket history instead of asking the customer to re-explain
+      weight: 2.0
+      scoring_type: llm_judge
+
+  persona_fidelity:
+    - name: professional_tone
+      description: Agent maintained professional composure throughout
+      weight: 1.0
+      scoring_type: llm_judge
+
+  efficiency:
+    - name: resolved_quickly
+      description: Issue resolved in a reasonable number of turns
+      weight: 1.0
+      scoring_type: llm_judge
+      deterministic_check: "turns <= 10"
+
+voice:
+  interaction_mode: turn_based
+  max_duration_seconds: 300
+  max_turns: 20
+  acceptable_response_latency_ms: 1200
+  good_response_latency_ms: 600
+  allow_agent_interrupts: false
+  allow_user_interrupts: true
+
+agent_system_prompt: >
+  You are a support agent for CloudBase, a cloud infrastructure provider.
+  You are speaking with {customer_name} (ID: {customer_id}), a {account_tier}
+  customer for {tenure_months} months.
+
+  ACCOUNT ISSUE:
+  - Expected monthly bill: ${monthly_bill_expected}
+  - Actual monthly bill: ${monthly_bill_actual}
+  - Overcharge: ${overcharge_amount}/month for {overcharge_months} months
+  - Total credit due: ${total_credit_due}
+  - Cancelled service still being billed: {cancelled_service}
+
+  HISTORY:
+  - This customer has called TWICE before about this issue
+  - Previous tickets: {previous_tickets}
+  - Neither was properly resolved
+
+  YOUR GOAL: Resolve this billing error. Apply the full credit. Retain the customer.
+  DO NOT make them repeat their story — you have the history. Take ownership.
+  Your credit authority is up to ${max_credit_authority}.
+
+allow_benchmark: true
+allow_training: true

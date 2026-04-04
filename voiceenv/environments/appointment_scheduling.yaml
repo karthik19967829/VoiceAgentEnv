@@ -1,0 +1,194 @@
+name: appointment_scheduling_complex
+description: >
+  A caller tries to reschedule a medical appointment with multiple constraints:
+  specific doctor preference, insurance verification needed, time zone confusion,
+  and a follow-up prescription refill. Tests multi-step task completion and
+  graceful error handling.
+version: "1.0.0"
+author: voiceenv
+tags: [scheduling, healthcare, multi-step, error-handling, timezone]
+vertical: scheduling
+difficulty: medium
+languages: [en]
+
+task:
+  goal: >
+    Help the caller reschedule their dermatology appointment, verify insurance
+    coverage, and process a prescription refill request — all in one call.
+  context: >
+    You are the AI scheduling assistant for Pacific Dermatology Associates.
+    The caller needs to reschedule a follow-up appointment, has insurance
+    questions, and needs a prescription refill for their eczema medication.
+  success_criteria:
+    - Appointment rescheduled to a valid slot with preferred doctor
+    - Insurance status confirmed
+    - Prescription refill request submitted
+    - All changes confirmed with the caller
+  failure_conditions:
+    - Booked with wrong doctor
+    - Booked outside available slots
+    - Forgot to handle one of the three requests
+    - Gave incorrect insurance information
+  terminal_conditions:
+    - All three tasks completed
+    - Caller gives up due to frustration
+    - Agent cannot resolve and escalates
+
+world_state:
+  description: Patient and clinic context
+  fields:
+    patient_name: David Kim
+    patient_id: PDA-11294
+    current_appointment: "2026-04-08T11:00:00 with Dr. Patel"
+    preferred_doctor: Dr. Patel
+    insurance_provider: Blue Cross Blue Shield
+    insurance_status: active
+    copay_amount: 45
+    prescription: "Triamcinolone acetonide 0.1% cream"
+    prescription_refills_remaining: 2
+    available_slots:
+      - doctor: Dr. Patel
+        slots: ["2026-04-15T09:00:00", "2026-04-15T14:30:00", "2026-04-17T10:00:00"]
+      - doctor: Dr. Rodriguez
+        slots: ["2026-04-14T11:00:00", "2026-04-16T09:00:00"]
+
+simulator:
+  persona_description: >
+    David Kim is a 29-year-old software engineer who recently moved from EST to
+    PST and keeps getting confused about time zones. He's friendly and cooperative
+    but slightly scattered — he'll mention the prescription refill partway through
+    the scheduling conversation as if he just remembered it. He prefers Dr. Patel
+    but would consider Dr. Rodriguez if the times are much better.
+  patience: 0.7
+  cooperativeness: 0.8
+  skepticism: 0.2
+  verbosity: 0.6
+  emotional_volatility: 0.2
+  dominance: 0.3
+  primary_language: en
+  formality: 0.3
+  filler_word_frequency: 0.4
+  interrupt_probability: 0.1
+  backchannel_frequency: 0.5
+  pause_tolerance_ms: 2500
+  topic_drift_probability: 0.3
+  hidden_goals:
+    - Get the appointment with Dr. Patel if at all possible
+    - Remember to ask about the prescription refill mid-conversation
+    - Confirm whether the times are Pacific or Eastern
+
+tools:
+  - name: reschedule_appointment
+    description: Reschedule an existing appointment
+    parameters:
+      - name: patient_id
+        type: string
+        required: true
+      - name: new_datetime
+        type: string
+        description: New appointment time in ISO 8601
+        required: true
+      - name: doctor
+        type: string
+        description: Doctor name
+        required: true
+    side_effects:
+      appointment_rescheduled: true
+
+  - name: verify_insurance
+    description: Verify patient insurance coverage
+    parameters:
+      - name: patient_id
+        type: string
+        required: true
+      - name: provider
+        type: string
+        required: true
+
+  - name: submit_refill_request
+    description: Submit a prescription refill request
+    parameters:
+      - name: patient_id
+        type: string
+        required: true
+      - name: medication
+        type: string
+        required: true
+    side_effects:
+      refill_submitted: true
+
+  - name: cancel_appointment
+    description: Cancel an existing appointment
+    parameters:
+      - name: patient_id
+        type: string
+        required: true
+      - name: appointment_datetime
+        type: string
+        required: true
+
+rubric:
+  task_success:
+    - name: appointment_rescheduled
+      description: Appointment was successfully rescheduled
+      weight: 2.5
+      scoring_type: binary
+      deterministic_check: "state.get('appointment_rescheduled', False)"
+
+    - name: refill_submitted
+      description: Prescription refill request was submitted
+      weight: 2.0
+      scoring_type: binary
+      deterministic_check: "state.get('refill_submitted', False)"
+
+    - name: all_items_addressed
+      description: Agent handled all three requests (reschedule, insurance, refill)
+      weight: 2.0
+      scoring_type: llm_judge
+
+  compliance:
+    - name: correct_information
+      description: All information given to the patient was accurate
+      weight: 2.0
+      scoring_type: llm_judge
+
+  voice_quality:
+    - name: handled_topic_switching
+      description: Agent smoothly handled when the patient jumped between topics
+      weight: 1.5
+      scoring_type: llm_judge
+
+    - name: clear_confirmations
+      description: Agent clearly confirmed each action before and after completing it
+      weight: 1.5
+      scoring_type: llm_judge
+
+  efficiency:
+    - name: efficient_multi_task
+      description: Agent efficiently handled multiple requests without excessive back-and-forth
+      weight: 1.0
+      scoring_type: llm_judge
+
+voice:
+  interaction_mode: turn_based
+  max_duration_seconds: 240
+  max_turns: 20
+  acceptable_response_latency_ms: 1200
+  good_response_latency_ms: 600
+
+agent_system_prompt: >
+  You are the AI scheduling assistant for Pacific Dermatology Associates.
+  You are speaking with {patient_name} (ID: {patient_id}).
+
+  CURRENT APPOINTMENT: {current_appointment}
+  INSURANCE: {insurance_provider} — {insurance_status}, copay ${copay_amount}
+  PRESCRIPTION ON FILE: {prescription} ({prescription_refills_remaining} refills remaining)
+
+  AVAILABLE SLOTS:
+  {available_slots}
+
+  All times are Pacific Time (PT). Be helpful, confirm details, and handle
+  multiple requests efficiently. Always confirm before making changes.
+
+allow_benchmark: true
+allow_training: true

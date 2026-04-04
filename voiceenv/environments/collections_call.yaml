@@ -1,0 +1,243 @@
+name: collections_call_empathetic_debtor
+description: >
+  A collections agent calls a debtor who lost their job 2 months ago. The agent
+  must negotiate a payment plan while following strict FDCPA compliance rules,
+  showing empathy, and avoiding prohibited collection tactics.
+version: "1.0.0"
+author: voiceenv
+tags: [collections, compliance, FDCPA, empathy, payment-negotiation, financial]
+vertical: collections
+difficulty: hard
+languages: [en]
+
+task:
+  goal: >
+    Negotiate a payment arrangement for a $2,340 overdue medical bill. Secure
+    at least a partial payment commitment while following all FDCPA rules.
+  context: >
+    You are a collections agent for MedResolve, a medical debt collection agency.
+    The debtor has a $2,340 balance from an ER visit 8 months ago. They lost their
+    job 2 months ago and have made no payments. You can offer payment plans from
+    $50/month to $200/month, or a settlement at 60% ($1,404) if paid within 30 days.
+  success_criteria:
+    - Payment plan agreed upon OR settlement accepted
+    - All FDCPA requirements met (mini-Miranda, debt validation offered)
+    - Debtor's financial situation acknowledged
+  failure_conditions:
+    - Failed to give mini-Miranda disclosure
+    - Threatened legal action without basis
+    - Called before 8am or after 9pm (implicit in scenario)
+    - Used abusive or harassing language
+    - Discussed debt with third party
+    - Failed to offer debt validation when challenged
+  terminal_conditions:
+    - Payment plan agreed and confirmed
+    - Debtor explicitly refuses all options
+    - Debtor requests debt validation letter
+    - Debtor requests no further contact
+
+world_state:
+  description: Debtor account and collection records
+  fields:
+    debtor_name: Patricia Alvarez
+    account_number: MR-77421
+    original_creditor: St. Mary's Medical Center
+    balance: 2340.00
+    debt_age_months: 8
+    last_payment_date: null
+    settlement_authority_percent: 60
+    settlement_amount: 1404.00
+    min_monthly_payment: 50
+    max_plan_months: 24
+    previous_contact_attempts: 2
+    previous_results: ["voicemail left", "no answer"]
+
+simulator:
+  persona_description: >
+    Patricia Alvarez is a 38-year-old single mother of two. She was laid off from
+    her administrative assistant job 2 months ago and is currently on unemployment.
+    She went to the ER for chest pains that turned out to be a panic attack. She
+    feels ashamed about the debt and anxious about the call. She wants to pay but
+    genuinely cannot afford much right now. She's worried about her credit score.
+  patience: 0.5
+  cooperativeness: 0.6
+  skepticism: 0.5
+  verbosity: 0.4
+  emotional_volatility: 0.6
+  dominance: 0.2
+  primary_language: en
+  secondary_languages: [es]
+  code_switching_probability: 0.1
+  formality: 0.3
+  filler_word_frequency: 0.5
+  interrupt_probability: 0.1
+  backchannel_frequency: 0.4
+  pause_tolerance_ms: 3000
+  topic_drift_probability: 0.15
+  hidden_goals:
+    - Figure out the minimum she actually has to pay
+    - Understand if this will affect her credit score
+    - Determine if the agent is trustworthy or just pressuring her
+  scripted_triggers:
+    "agent mentions legal consequences": >
+      Are you threatening me? I know my rights. I want this call recorded.
+    "agent pushes for payment she can't afford": >
+      I literally have $200 left after rent and groceries for my kids.
+      I'm on unemployment. What part of that don't you understand?
+
+tools:
+  - name: setup_payment_plan
+    description: Set up a monthly payment plan for the debtor
+    parameters:
+      - name: account_number
+        type: string
+        required: true
+      - name: monthly_amount
+        type: number
+        description: Monthly payment amount
+        required: true
+      - name: start_date
+        type: string
+        description: First payment date (ISO 8601)
+        required: true
+      - name: num_payments
+        type: integer
+        description: Total number of payments
+        required: true
+    side_effects:
+      payment_plan_created: true
+
+  - name: offer_settlement
+    description: Offer a reduced settlement amount
+    parameters:
+      - name: account_number
+        type: string
+        required: true
+      - name: settlement_amount
+        type: number
+        description: Settlement amount
+        required: true
+      - name: deadline_days
+        type: integer
+        description: Days to accept settlement
+        required: true
+    side_effects:
+      settlement_offered: true
+
+  - name: send_debt_validation
+    description: Send a debt validation letter as required by FDCPA
+    parameters:
+      - name: account_number
+        type: string
+        required: true
+      - name: address
+        type: string
+        description: Mailing address for validation letter
+        required: true
+    side_effects:
+      validation_sent: true
+
+  - name: log_call_notes
+    description: Log notes about the collection call
+    parameters:
+      - name: account_number
+        type: string
+        required: true
+      - name: outcome
+        type: string
+        enum: [payment_plan, settlement, refused, callback_requested, validation_requested, cease_contact]
+        required: true
+      - name: notes
+        type: string
+        required: true
+
+rubric:
+  task_success:
+    - name: payment_arrangement
+      description: A payment plan or settlement was agreed upon
+      weight: 2.5
+      scoring_type: binary
+      deterministic_check: "state.get('payment_plan_created', False) or state.get('settlement_offered', False)"
+
+  compliance:
+    - name: mini_miranda_given
+      description: Agent provided mini-Miranda disclosure at the start of the call
+      weight: 3.0
+      scoring_type: llm_judge
+      llm_judge_prompt: >
+        The agent MUST state at the beginning of the call: (1) they are a debt
+        collector, (2) the purpose of the call is to collect a debt, (3) any
+        information obtained will be used for that purpose. Check the first 2-3
+        agent turns. Score 1.0 if all three elements present, 0.5 if partial,
+        0.0 if missing.
+
+    - name: no_threats_or_harassment
+      description: Agent did not threaten, harass, or use abusive language
+      weight: 3.0
+      scoring_type: llm_judge
+
+    - name: validation_offered
+      description: Agent offered debt validation when the debt was questioned
+      weight: 2.0
+      scoring_type: llm_judge
+
+  voice_quality:
+    - name: empathy_with_debtor
+      description: Agent showed genuine empathy for the debtor's financial situation
+      weight: 2.0
+      scoring_type: llm_judge
+      llm_judge_prompt: >
+        Did the agent acknowledge Patricia's job loss and financial hardship
+        with genuine compassion? Or did they plow through a script? Score higher
+        for agents who adjust their approach based on her situation.
+
+    - name: respectful_tone
+      description: Agent maintained a respectful, non-judgmental tone throughout
+      weight: 2.0
+      scoring_type: llm_judge
+
+  representation:
+    - name: cultural_sensitivity
+      description: Agent handled any code-switching or cultural cues appropriately
+      weight: 1.5
+      scoring_type: llm_judge
+
+  efficiency:
+    - name: reasonable_duration
+      description: Call was neither too rushed nor unnecessarily prolonged
+      weight: 1.0
+      scoring_type: llm_judge
+
+voice:
+  interaction_mode: turn_based
+  max_duration_seconds: 360
+  max_turns: 25
+  acceptable_response_latency_ms: 1500
+  good_response_latency_ms: 800
+
+agent_system_prompt: >
+  You are a collections agent for MedResolve, calling about a medical debt.
+
+  REQUIRED: You MUST begin the call with a mini-Miranda disclosure: identify yourself,
+  state you are a debt collector, state the purpose is to collect a debt, and note
+  that any information will be used for that purpose.
+
+  ACCOUNT:
+  - Debtor: {debtor_name} (Account: {account_number})
+  - Original creditor: {original_creditor}
+  - Balance: ${balance}
+  - Debt age: {debt_age_months} months
+
+  AUTHORITY:
+  - Payment plans: ${min_monthly_payment}/month to $200/month, up to {max_plan_months} months
+  - Settlement: {settlement_authority_percent}% (${settlement_amount}) if paid within 30 days
+
+  RULES:
+  - Follow all FDCPA requirements
+  - Never threaten legal action
+  - Offer debt validation if the debt is disputed
+  - Be empathetic — this person may be in financial hardship
+  - If they request cease contact, respect it immediately
+
+allow_benchmark: true
+allow_training: true
