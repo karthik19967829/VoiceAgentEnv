@@ -471,10 +471,12 @@ def eval_experiment(eval_model, runs, rollout_runs, output_dir):
 
     # Step 3: Instructions for training
     console.print(Panel(
-        f"[bold]Step 3/3: Fine-tune on Modal[/bold]\n\n"
-        f"  [cyan]modal run voiceenv/training/experiment.py[/cyan]\n\n"
-        f"Or use the rollouts with any GRPO training pipeline:\n"
-        f"  [cyan]voiceenv train modal --model Qwen/Qwen3-Omni-30B-A3B-Instruct[/cyan]\n\n"
+        f"[bold]Step 3/3: Post-train with one command[/bold]\n\n"
+        f"  [cyan]voiceenv train run --framework verl --model Qwen/Qwen2.5-3B-Instruct "
+        f"--rollouts {out / 'rollouts.jsonl'}[/cyan]\n\n"
+        f"Or with ms-swift (Qwen3-Omni native support):\n"
+        f"  [cyan]voiceenv train run --framework ms-swift --model Qwen/Qwen3-Omni-30B-A3B-Instruct "
+        f"--rollouts {out / 'rollouts.jsonl'}[/cyan]\n\n"
         f"After training, compare:\n"
         f"  [cyan]voiceenv eval compare {out / 'baseline_eval.json'} posttrain_eval.json[/cyan]",
         border_style="green",
@@ -483,7 +485,7 @@ def eval_experiment(eval_model, runs, rollout_runs, output_dir):
 
 @cli.group()
 def train():
-    """Training commands — generate rollouts and fine-tune speech LLMs."""
+    """Training commands — generate rollouts and post-train speech LLMs."""
     pass
 
 
@@ -509,44 +511,44 @@ def train_rollouts(env_dir, model, simulator_model, runs_per_env, output, base_u
     )
 
 
-@train.command("modal")
-@click.option("--model", default="Qwen/Qwen3-Omni-30B-A3B-Instruct", help="Model to fine-tune")
-@click.option("--runs-per-env", default=20, help="Rollout runs per environment")
+@train.command("run")
+@click.option("--framework", "-f", required=True,
+              type=click.Choice(["verl", "ms-swift", "trl"]),
+              help="Training framework to use")
+@click.option("--model", "-m", required=True, help="Model to fine-tune")
+@click.option("--rollouts", "-r", required=True, help="Path to rollouts JSONL")
+@click.option("--output", "-o", default="voiceenv_trained", help="Output directory")
 @click.option("--lora-rank", default=16, help="LoRA rank")
 @click.option("--lr", default=2e-5, help="Learning rate")
 @click.option("--epochs", default=2, help="Training epochs")
-def train_modal(model, runs_per_env, lora_rank, lr, epochs):
-    """Fine-tune on Modal serverless GPUs (H100)."""
-    console.print("[bold]Modal Training Pipeline[/bold]\n")
-    console.print(f"Model: [cyan]{model}[/cyan]")
-    console.print(f"GPU: [cyan]H100 (serverless)[/cyan]")
-    console.print(f"\nTo run the full pipeline:")
-    console.print(f"  [cyan]modal run voiceenv/training/modal_train.py "
-                  f"--model {model} --runs-per-env {runs_per_env} "
-                  f"--lora-rank {lora_rank} --learning-rate {lr} --epochs {epochs}[/cyan]")
-    console.print(f"\nOr step by step:")
-    console.print(f"  [cyan]modal run voiceenv/training/modal_train.py --generate-only[/cyan]")
-    console.print(f"  [cyan]modal run voiceenv/training/modal_train.py --train-only[/cyan]")
-    console.print(f"  [cyan]modal run voiceenv/training/modal_train.py --eval-only[/cyan]")
+@click.option("--batch-size", default=2, help="Batch size per device")
+@click.option("--num-gpus", default=1, help="Number of GPUs (VERL/ms-swift)")
+def train_run(framework, model, rollouts, output, lora_rank, lr, epochs, batch_size, num_gpus):
+    """Post-train a model using VERL, ms-swift, or TRL.
 
+    \b
+    Frameworks:
+      verl      — ByteDance's production GRPO framework (pip install verl)
+      ms-swift  — ModelScope, native Qwen3-Omni support (pip install ms-swift)
+      trl       — HuggingFace TRL GRPOTrainer (pip install trl)
 
-@train.command("baseten")
-@click.option("--rollouts", required=True, help="Path to rollouts JSONL")
-@click.option("--model", default="Qwen/Qwen3-Omni-30B-A3B-Instruct", help="Model to fine-tune")
-@click.option("--output", "-o", default="baseten_voiceenv_training", help="Output project dir")
-@click.option("--gpu", default="H100", type=click.Choice(["H100", "H200", "A10G"]))
-@click.option("--lora-rank", default=16, help="LoRA rank")
-@click.option("--max-steps", default=200, help="Max training steps")
-def train_baseten(rollouts, model, output, gpu, lora_rank, max_steps):
-    """Generate a Baseten training project for managed GPU fine-tuning."""
-    from voiceenv.training.baseten_train import generate_baseten_project
-    generate_baseten_project(
+    \b
+    Examples:
+      voiceenv train run -f verl -m Qwen/Qwen2.5-3B-Instruct -r rollouts.jsonl
+      voiceenv train run -f ms-swift -m Qwen/Qwen3-Omni-30B-A3B-Instruct -r rollouts.jsonl
+      voiceenv train run -f trl -m Qwen/Qwen2.5-3B-Instruct -r rollouts.jsonl
+    """
+    from voiceenv.training.launch import launch_training
+    launch_training(
+        framework=framework,
+        model=model,
         rollouts_path=rollouts,
         output_dir=output,
-        model_name=model,
-        gpu_type=gpu,
         lora_rank=lora_rank,
-        max_steps=max_steps,
+        learning_rate=lr,
+        epochs=epochs,
+        batch_size=batch_size,
+        num_gpus=num_gpus,
     )
 
 
