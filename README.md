@@ -305,11 +305,87 @@ culturally_aware              19     0.312     0.289  0.287        [LOW]
 
 Low-correlation criteria get flagged — the community knows exactly where to add better expert references to improve the judge.
 
-## Training Pipeline
+## Post-Training Experiment
 
-Generate RL training data from environments and fine-tune speech LLMs.
+The end-to-end proof that VoiceEnv environments produce useful training signal for speech LLMs.
 
-### Generate rollouts
+### The experiment
+
+```
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   BASELINE   │     │   GENERATE   │     │    GRPO      │     │  POST-TRAIN  │     │  COMPARISON  │
+│   EVAL       │────▶│   ROLLOUTS   │────▶│  FINE-TUNE   │────▶│    EVAL      │────▶│   REPORT     │
+│              │     │              │     │              │     │              │     │              │
+│  5 envs ×10  │     │  5 envs ×20  │     │  Qwen3-Omni  │     │  5 envs ×10  │     │  per-criterion│
+│  = baseline  │     │  = 100 convos│     │  LoRA + H100 │     │  = trained   │     │  delta table │
+└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+```
+
+### Run the full experiment on Modal
+
+```bash
+# Prerequisites
+pip install modal
+modal setup
+modal secret create openai-secret OPENAI_API_KEY=sk-...
+modal secret create huggingface-secret HF_TOKEN=hf_...
+
+# Full pipeline (baseline → rollouts → train → eval → report)
+modal run voiceenv/training/experiment.py
+
+# Or step by step
+modal run voiceenv/training/experiment.py --step baseline
+modal run voiceenv/training/experiment.py --step rollouts
+modal run voiceenv/training/experiment.py --step train
+modal run voiceenv/training/experiment.py --step posttrain
+modal run voiceenv/training/experiment.py --step report
+```
+
+### Run locally (eval + rollouts, then train on cloud)
+
+```bash
+# Step 1: Baseline eval + generate rollouts
+voiceenv eval experiment --eval-model gpt-4o-mini --runs 5 --rollout-runs 20
+
+# Step 2: Train on Modal
+modal run voiceenv/training/experiment.py --step train
+
+# Step 3: Compare results
+voiceenv eval compare experiment_results/baseline_eval.json posttrain_eval.json
+```
+
+### What the comparison report looks like
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ Post-Training Comparison                                  │
+│ Baseline: gpt-4o-mini                                     │
+│ Trained:  voiceenv-qwen3-omni-lora                        │
+├──────────────────────────────────────────────────────────┤
+│                                                           │
+│ Overall Reward:   0.4821 → 0.6437  +0.1616 (+33.5%)     │
+│ Verifiable:       0.5103 → 0.7241  +0.2138              │
+│ Soft:             0.4012 → 0.4650  +0.0638              │
+│                                                           │
+│ Environments:  4 improved  0 regressed  1 unchanged       │
+│ Criteria:     18 improved  2 regressed                    │
+└──────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────┐
+│ VERDICT: SUCCESS                                          │
+│                                                           │
+│ Post-training improved overall reward by +33.5%           │
+│ Verifiable reward (real capability) improved by +0.2138   │
+│ The gain is grounded in deterministic checks, not just    │
+│ LLM-judge gaming.                                         │
+└──────────────────────────────────────────────────────────┘
+```
+
+The report explicitly separates verifiable vs soft improvements — if verifiable reward improves, the model genuinely got better at the task. If only soft reward improves, it may be gaming the LLM judge.
+
+### Training pipeline details
+
+**Generate rollouts:**
 
 ```bash
 voiceenv train rollouts voiceenv/environments/ \
@@ -318,7 +394,7 @@ voiceenv train rollouts voiceenv/environments/ \
   --output rollouts.jsonl
 ```
 
-### Fine-tune on Modal (serverless H100s)
+**Fine-tune on Modal (serverless H100s):**
 
 ```bash
 modal run voiceenv/training/modal_train.py \
@@ -328,16 +404,14 @@ modal run voiceenv/training/modal_train.py \
   --epochs 2
 ```
 
-### Fine-tune on Baseten (managed GPUs)
+**Fine-tune on Baseten (managed GPUs):**
 
 ```bash
-# Generate the Baseten training project
 voiceenv train baseten \
   --rollouts rollouts.jsonl \
   --model Qwen/Qwen3-Omni-30B-A3B-Instruct \
   --gpu H100
 
-# Submit to Baseten
 cd baseten_voiceenv_training && bash run.sh
 ```
 
@@ -349,11 +423,14 @@ voiceenv/
 │   ├── schema.py              # Environment spec (Pydantic models)
 │   ├── simulator.py           # LLM-backed user simulator
 │   ├── sandbox.py             # Tool execution & world state
-│   ├── scorer.py              # Verifiable + soft scoring engine
+│   ├── scorer.py              # Verifiable + soft + grounded scoring
 │   ├── runner.py              # End-to-end environment runner
 │   ├── grounded_judge.py      # Gemini multimodal judge
 │   ├── human_ratings.py       # Community rating collection
 │   └── judge_correlation.py   # Human-LLM correlation tracking
+├── eval/
+│   ├── evaluator.py           # Systematic model evaluation harness
+│   └── comparison.py          # Before/after comparison reports
 ├── environments/
 │   ├── founder_sales.yaml
 │   ├── support_escalation.yaml
@@ -364,6 +441,7 @@ voiceenv/
 │   ├── openenv_exporter.py    # Export to OpenEnv (HuggingFace)
 │   └── prime_exporter.py      # Export to Prime Intellect
 ├── training/
+│   ├── experiment.py          # Full post-training experiment (Modal)
 │   ├── generate_rollouts.py   # Rollout generation
 │   ├── grpo_train.py          # Local GRPO fine-tuning
 │   ├── modal_train.py         # Modal serverless training

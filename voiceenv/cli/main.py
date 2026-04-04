@@ -389,6 +389,99 @@ def benchmark(env_dir: str, model: tuple[str, ...], runs: int, output: str):
 
 
 @cli.group()
+def eval():
+    """Evaluation commands — measure and compare model performance."""
+    pass
+
+
+@eval.command("run")
+@click.option("--model", "-m", default="gpt-4o-mini", help="Model to evaluate")
+@click.option("--env-dir", default=None, help="Environment directory (default: built-in)")
+@click.option("--runs", "-n", default=5, help="Runs per environment")
+@click.option("--simulator-model", default="gpt-4o-mini", help="Simulator model")
+@click.option("--base-url", default=None, help="Custom API endpoint for model")
+@click.option("--api-key", default=None, help="API key for custom endpoint")
+@click.option("--output", "-o", required=True, help="Save results JSON to this path")
+@click.option("--verifiable-only", is_flag=True, help="Skip soft scoring (faster)")
+def eval_run(model, env_dir, runs, simulator_model, base_url, api_key, output, verifiable_only):
+    """Evaluate a model across all VoiceEnv environments."""
+    from voiceenv.eval.evaluator import evaluate
+
+    results = evaluate(
+        model=model,
+        env_dir=env_dir,
+        runs_per_env=runs,
+        simulator_model=simulator_model,
+        base_url=base_url,
+        api_key=api_key,
+        skip_soft_scoring=verifiable_only,
+    )
+    results.save(output)
+    console.print(f"\n[green]Results saved to:[/green] {output}")
+
+
+@eval.command("compare")
+@click.argument("baseline_path")
+@click.argument("trained_path")
+@click.option("--output", "-o", default=None, help="Save report JSON")
+def eval_compare(baseline_path, trained_path, output):
+    """Compare baseline vs trained model evaluation results."""
+    from voiceenv.eval.evaluator import EvalResults
+    from voiceenv.eval.comparison import compare, print_comparison
+
+    baseline = EvalResults.load(baseline_path)
+    trained = EvalResults.load(trained_path)
+
+    report = compare(baseline, trained)
+    print_comparison(report)
+
+    if output:
+        report.save(output)
+        console.print(f"\n[green]Report saved to:[/green] {output}")
+
+
+@eval.command("experiment")
+@click.option("--eval-model", default="gpt-4o-mini", help="Model for eval (API-based)")
+@click.option("--runs", "-n", default=5, help="Eval runs per environment")
+@click.option("--rollout-runs", default=20, help="Rollout runs per environment")
+@click.option("--output-dir", "-o", default="experiment_results", help="Output directory")
+def eval_experiment(eval_model, runs, rollout_runs, output_dir):
+    """Run a local baseline eval + rollout generation experiment."""
+    from voiceenv.eval.evaluator import evaluate
+    from voiceenv.training.generate_rollouts import generate_rollouts
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Step 1: Baseline eval
+    console.print(Panel("[bold]Step 1/3: Baseline Evaluation[/bold]", border_style="cyan"))
+    baseline = evaluate(model=eval_model, runs_per_env=runs)
+    baseline.save(out / "baseline_eval.json")
+    console.print(f"[green]Baseline saved:[/green] {out / 'baseline_eval.json'}")
+
+    # Step 2: Generate rollouts
+    console.print(Panel("[bold]Step 2/3: Generating Rollouts[/bold]", border_style="cyan"))
+    generate_rollouts(
+        env_dir="voiceenv/environments",
+        model=eval_model,
+        runs_per_env=rollout_runs,
+        output_path=str(out / "rollouts.jsonl"),
+    )
+    console.print(f"[green]Rollouts saved:[/green] {out / 'rollouts.jsonl'}")
+
+    # Step 3: Instructions for training
+    console.print(Panel(
+        f"[bold]Step 3/3: Fine-tune on Modal[/bold]\n\n"
+        f"  [cyan]modal run voiceenv/training/experiment.py[/cyan]\n\n"
+        f"Or use the rollouts with any GRPO training pipeline:\n"
+        f"  [cyan]voiceenv train modal --model Qwen/Qwen3-Omni-30B-A3B-Instruct[/cyan]\n\n"
+        f"After training, compare:\n"
+        f"  [cyan]voiceenv eval compare {out / 'baseline_eval.json'} posttrain_eval.json[/cyan]",
+        border_style="green",
+    ))
+
+
+@cli.group()
 def train():
     """Training commands — generate rollouts and fine-tune speech LLMs."""
     pass
