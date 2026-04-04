@@ -357,6 +357,38 @@ culturally_aware              19     0.312     0.289  0.287        [LOW]
 
 Low-correlation criteria get flagged — the community knows exactly where to add better expert references to improve the judge.
 
+## Cloud GPUs via Modal
+
+All GPU workloads run on [Modal](https://modal.com) — serverless A100/H100 GPUs with sub-second startup. No infra to manage.
+
+```bash
+pip install -e ".[cloud]"
+modal setup  # one-time auth
+
+# Deploy Qwen3-Omni as a vLLM server on A100
+voiceenv cloud serve
+
+# Run a voice conversation on GPU (agent + simulator are speech LLMs)
+voiceenv cloud run healthcare_triage --save-for-rating
+
+# Generate training rollouts on GPU
+voiceenv cloud rollouts voiceenv/environments/ --runs-per-env 20 -o rollouts.jsonl
+
+# Post-train with ms-swift GRPO on 2x A100
+voiceenv cloud train -r rollouts.jsonl
+```
+
+Under the hood this uses a single Modal app (`voiceenv.cloud.modal_app`) with four functions:
+
+| Function | GPU | What it does |
+|----------|-----|--------------|
+| `serve_speech_llm` | A100 | Serves Qwen3-Omni via vLLM with OpenAI-compatible API |
+| `run_voice_env` | A100 | Spins up a local vLLM, runs a voice conversation, saves audio |
+| `generate_rollouts` | A100 | Generates training data across all environments |
+| `train_grpo` | A100x2 | Runs ms-swift GRPO fine-tuning with LoRA |
+
+Model weights are cached in a Modal Volume (`voiceenv-hf-cache`) so they're only downloaded once. Training checkpoints and audio recordings persist in `voiceenv-data`.
+
 ## Post-Training: One Command
 
 We don't implement training. We generate the data and reward signal, then hand off to [ms-swift](https://github.com/modelscope/ms-swift) which has native Qwen3-Omni GRPO support.
@@ -422,6 +454,8 @@ voiceenv/
 ├── ui/                            # WEB UI FOR COMMUNITY RATING
 │   ├── app.py                     #   FastAPI server + single-page app
 │   └── demo_data.py               #   Demo conversations for first-time use
+├── cloud/                         # MODAL GPU INFRASTRUCTURE
+│   └── modal_app.py               #   Serve, run, train on serverless GPUs
 └── cli/
     └── main.py                    #   CLI entry point
 ```

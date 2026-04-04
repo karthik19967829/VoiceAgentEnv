@@ -667,6 +667,241 @@ def train_run(model, rollouts, output, lora_rank, lr, epochs, batch_size):
 
 
 @cli.group()
+def cloud():
+    """Cloud GPU commands via Modal — serve, run, and train on remote GPUs."""
+    pass
+
+
+@cloud.command("serve")
+@click.option("--model", "-m", default="Qwen/Qwen3-Omni-30B-A3B-Instruct",
+              help="Speech LLM to serve")
+@click.option("--gpu", default="A100", help="GPU type (A100, H100, A10G, L4)")
+def cloud_serve(model, gpu):
+    """Deploy a speech LLM on Modal GPU via vLLM.
+
+    \b
+    Examples:
+      voiceenv cloud serve
+      voiceenv cloud serve -m Qwen/Qwen2.5-7B-Instruct --gpu L4
+    """
+    console.print(Panel(
+        f"[bold]Deploying speech LLM on Modal[/bold]\n\n"
+        f"Model: [cyan]{model}[/cyan]\n"
+        f"GPU:   [cyan]{gpu}[/cyan]\n\n"
+        f"This will deploy a vLLM server with an OpenAI-compatible API.\n"
+        f"The URL will be printed once the server is ready.",
+        title="Modal Deploy",
+        border_style="green",
+    ))
+    import subprocess as sp
+    sp.run(["modal", "deploy", "voiceenv.cloud.modal_app"], check=True)
+
+
+@cloud.command("run")
+@click.argument("env_path")
+@click.option("--agent-model", "-m", default="Qwen/Qwen3-Omni-30B-A3B-Instruct",
+              help="Agent speech LLM")
+@click.option("--simulator-model", default="gpt-4o", help="Simulator speech LLM")
+@click.option("--simulator-api-key", default=None, help="API key for simulator model")
+@click.option("--save-for-rating", is_flag=True, help="Save to ratings store for community review")
+@click.option("--ratings-dir", default="ratings", help="Ratings directory")
+def cloud_run(env_path, agent_model, simulator_model, simulator_api_key,
+              save_for_rating, ratings_dir):
+    """Run a voice environment on Modal GPU (two speech LLMs talking).
+
+    \b
+    Examples:
+      voiceenv cloud run healthcare_triage
+      voiceenv cloud run my_env.yaml --save-for-rating
+    """
+    from voiceenv.core.schema import VoiceEnvironment
+    from voiceenv.environments import load_environment
+
+    path = Path(env_path)
+    if path.exists():
+        env = VoiceEnvironment.from_yaml(path)
+    else:
+        try:
+            env = load_environment(env_path)
+        except FileNotFoundError:
+            console.print(f"[red]Environment not found:[/red] {env_path}")
+            sys.exit(1)
+
+    env_yaml = env.to_yaml()
+
+    console.print(Panel(
+        f"[bold]{env.name}[/bold]\n"
+        f"Agent: [cyan]{agent_model}[/cyan]\n"
+        f"Simulator: [cyan]{simulator_model}[/cyan]\n"
+        f"Running on Modal GPU...",
+        title="Cloud Voice Run",
+        border_style="green",
+    ))
+
+    import modal
+    app_ref = modal.App.lookup("voiceenv")
+    run_fn = app_ref.run_voice_env
+
+    result = run_fn.remote(
+        env_yaml=env_yaml,
+        agent_model=agent_model,
+        simulator_model=simulator_model,
+        simulator_api_key=simulator_api_key or "",
+    )
+
+    if result.get("error"):
+        console.print(f"[red]Error:[/red] {result['error']}")
+        return
+
+    console.print(f"\n[green]Run completed![/green]")
+    console.print(f"Turns: {result.get('turn_count', 0)} | "
+                  f"Duration: {result.get('duration_seconds', 0):.1f}s | "
+                  f"Interruptions: {result.get('interruption_count', 0)}")
+
+    output_path = Path(f"cloud_run_{env.name}.json")
+    output_path.write_text(json.dumps(result, indent=2))
+    console.print(f"Results saved to: [cyan]{output_path}[/cyan]")
+
+    if save_for_rating:
+        from voiceenv.core.human_ratings import RatingStore, RunForRating, generate_run_id
+
+        transcript = result.get("transcript", [])
+        run_id = generate_run_id(env.name, transcript)
+        criteria = [{"name": sc.name, "description": sc.description} for sc in env.rubric.all_criteria()]
+
+        run_for_rating = RunForRating(
+            run_id=run_id,
+            environment_name=env.name,
+            transcript=transcript,
+            criteria_to_rate=criteria,
+            audio_dir=result.get("audio_dir"),
+        )
+        store = RatingStore(ratings_dir)
+        store.save_run_for_rating(run_for_rating)
+        console.print(f"[green]Saved for community rating:[/green] {run_id}")
+
+
+@cloud.command("train")
+@click.option("--model", "-m", default="Qwen/Qwen3-Omni-30B-A3B-Instruct",
+              help="Model to fine-tune")
+@click.option("--rollouts", "-r", required=True, help="Path to rollouts JSONL")
+@click.option("--gpu", default="A100:2", help="GPU config (e.g. A100:2, H100:4)")
+@click.option("--lora-rank", default=16, help="LoRA rank")
+@click.option("--lr", default=2e-5, help="Learning rate")
+@click.option("--epochs", default=2, help="Training epochs")
+@click.option("--batch-size", default=2, help="Batch size per device")
+def cloud_train(model, rollouts, gpu, lora_rank, lr, epochs, batch_size):
+    """Post-train a speech LLM with ms-swift GRPO on Modal GPUs.
+
+    \b
+    Examples:
+      voiceenv cloud train -r rollouts.jsonl
+      voiceenv cloud train -m Qwen/Qwen2.5-7B-Instruct -r rollouts.jsonl --gpu H100:4
+    """
+    rollouts_path = Path(rollouts)
+    if not rollouts_path.exists():
+        console.print(f"[red]Rollouts file not found:[/red] {rollouts}")
+        sys.exit(1)
+
+    rollouts_jsonl = rollouts_path.read_text()
+    n_examples = sum(1 for line in rollouts_jsonl.strip().split("\n") if line.strip())
+
+    console.print(Panel(
+        f"[bold]ms-swift GRPO Training on Modal[/bold]\n\n"
+        f"Model:    [cyan]{model}[/cyan]\n"
+        f"GPU:      [cyan]{gpu}[/cyan]\n"
+        f"Examples: [cyan]{n_examples}[/cyan]\n"
+        f"LoRA:     [cyan]rank={lora_rank}[/cyan]\n"
+        f"LR:       [cyan]{lr}[/cyan]\n"
+        f"Epochs:   [cyan]{epochs}[/cyan]",
+        title="Cloud Training",
+        border_style="green",
+    ))
+
+    import modal
+    app_ref = modal.App.lookup("voiceenv")
+    train_fn = app_ref.train_grpo
+
+    result = train_fn.remote(
+        model=model,
+        rollouts_jsonl=rollouts_jsonl,
+        lora_rank=lora_rank,
+        learning_rate=lr,
+        epochs=epochs,
+        batch_size=batch_size,
+    )
+
+    if result.get("error"):
+        console.print(f"[red]Error:[/red] {result['error']}")
+        return
+
+    exit_code = result.get("exit_code", -1)
+    if exit_code == 0:
+        console.print(f"\n[green]Training completed successfully![/green]")
+        console.print(f"Output: [cyan]{result.get('output_dir')}[/cyan]")
+    else:
+        console.print(f"\n[red]Training failed (exit code {exit_code})[/red]")
+        if result.get("stderr_tail"):
+            console.print(f"[dim]{result['stderr_tail'][-500:]}[/dim]")
+
+
+@cloud.command("rollouts")
+@click.argument("env_dir", default="voiceenv/environments")
+@click.option("--agent-model", "-m", default="Qwen/Qwen3-Omni-30B-A3B-Instruct",
+              help="Agent speech LLM")
+@click.option("--simulator-model", default="gpt-4o", help="Simulator speech LLM")
+@click.option("--simulator-api-key", default=None, help="API key for simulator")
+@click.option("--runs-per-env", "-n", default=10, help="Runs per environment")
+@click.option("--output", "-o", default="rollouts.jsonl", help="Output file")
+def cloud_rollouts(env_dir, agent_model, simulator_model, simulator_api_key,
+                   runs_per_env, output):
+    """Generate training rollouts on Modal GPU.
+
+    \b
+    Examples:
+      voiceenv cloud rollouts voiceenv/environments/ --runs-per-env 20
+    """
+    from voiceenv.core.schema import VoiceEnvironment
+
+    env_path = Path(env_dir)
+    yaml_files = sorted(env_path.glob("*.yaml"))
+    if not yaml_files:
+        console.print(f"[red]No .yaml files found in {env_dir}[/red]")
+        sys.exit(1)
+
+    env_yamls = []
+    for yf in yaml_files:
+        env = VoiceEnvironment.from_yaml(yf)
+        env_yamls.append(env.to_yaml())
+
+    console.print(Panel(
+        f"[bold]Generating rollouts on Modal GPU[/bold]\n\n"
+        f"Environments: [cyan]{len(env_yamls)}[/cyan]\n"
+        f"Runs/env:     [cyan]{runs_per_env}[/cyan]\n"
+        f"Agent:        [cyan]{agent_model}[/cyan]\n"
+        f"Simulator:    [cyan]{simulator_model}[/cyan]",
+        title="Cloud Rollouts",
+        border_style="green",
+    ))
+
+    import modal
+    app_ref = modal.App.lookup("voiceenv")
+    rollouts_fn = app_ref.generate_rollouts
+
+    rollouts_jsonl = rollouts_fn.remote(
+        env_yamls=env_yamls,
+        agent_model=agent_model,
+        simulator_model=simulator_model,
+        simulator_api_key=simulator_api_key or "",
+        runs_per_env=runs_per_env,
+    )
+
+    Path(output).write_text(rollouts_jsonl)
+    n_lines = sum(1 for line in rollouts_jsonl.strip().split("\n") if line.strip())
+    console.print(f"\n[green]Generated {n_lines} rollouts[/green] → {output}")
+
+
+@cli.group()
 def judge():
     """Judge validation — rate runs, compute correlation, build trust."""
     pass

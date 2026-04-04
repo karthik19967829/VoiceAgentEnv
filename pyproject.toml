@@ -26,7 +26,8 @@ grounded-judge = ["google-genai>=1.0.0"]
 training = ["ms-swift"]
 ui = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 voice = ["pipecat-ai[openai,silero]>=0.0.50", "edge-tts>=6.1"]
-all = ["voiceenv[openenv,prime,grounded-judge,training,ui,voice]"]
+cloud = ["modal>=0.73"]
+all = ["voiceenv[openenv,prime,grounded-judge,training,ui,voice,cloud]"]
 
 [project.scripts]
 voiceenv = "voiceenv.cli.main:cli"
