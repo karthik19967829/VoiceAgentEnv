@@ -236,6 +236,11 @@ DOCKERFILE_TEMPLATE = Template('''FROM python:3.11-slim
 
 WORKDIR /app
 
+# git is required for pip git+https installs (e.g. installing voiceenv from
+# its public GitHub repo); ffmpeg is required for audio slicing at runtime.
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg \\
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
