@@ -362,8 +362,12 @@ def export_openenv(env: VoiceEnvironment, output_dir: str | Path) -> Path:
     (pkg_dir / "Dockerfile").write_text(DOCKERFILE_TEMPLATE.render(**ctx))
 
     # requirements.txt — also at repo ROOT for the same reason
+    # `voiceenv` isn't on PyPI yet; install from the public GitHub source so
+    # the HuggingFace Space build can resolve it.
     requirements = (
-        "openenv-core\nvoiceenv\nopenai>=1.0\npyyaml>=6.0\nhttpx>=0.25\n"
+        "openenv-core\n"
+        "voiceenv @ git+https://github.com/karthik19967829/VoiceAgentEnv.git@main\n"
+        "openai>=1.0\npyyaml>=6.0\nhttpx>=0.25\n"
         "uvicorn[standard]>=0.27\nfastapi>=0.110\n"
     )
     (pkg_dir / "requirements.txt").write_text(requirements)
