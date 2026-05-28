@@ -1,0 +1,9 @@
+{
+  "source_file": "0091a706bc604188.wav",
+  "n_turns": 8,
+  "duration_seconds": 46.6,
+  "annotations": [
+    "Ground truth: this is how a real human agent handled this exact task.",
+    "Use for grounded comparison of tone, pacing, and de-escalation."
+  ]
+}

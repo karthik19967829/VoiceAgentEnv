@@ -4,6 +4,33 @@
 
 VoiceEnv is an open platform where the community creates voice agent environments — realistic conversational scenarios with verifiable rewards — that directly drive the post-training of speech LLMs like Qwen3-Omni. Think of it as the voice-native equivalent of code execution environments for RL, but for spoken conversations.
 
+## Published artifacts
+
+- **HF Space (OpenEnv-compatible Docker)**: [karthik/voiceenv-money-transfer](https://huggingface.co/spaces/karthik/voiceenv-money-transfer)
+- **HF Dataset (env + expert audio + rollouts)**: [karthik/voiceenv-money-transfer](https://huggingface.co/datasets/karthik/voiceenv-money-transfer)
+
+## 30-second demo
+
+```bash
+git clone https://github.com/karthik19967829/VoiceAgentEnv.git
+cd VoiceAgentEnv && pip install -e .
+cp .env.example .env  # then fill in your OPENAI_API_KEY, HUGGINGFACE_TOKEN, GEMINI_API_KEY
+
+# Launch the live web demo
+voiceenv ui --port 8911
+# → open http://127.0.0.1:8911/ and click "Run demo"
+```
+
+The demo runs the full loop:
+1. Autonomously extract an RL environment from a single real call WAV
+2. Slice the caller's audio per-turn
+3. Run stateless turn-level eval against gpt-audio-mini (parallel)
+4. Grounded multimodal judging with Gemini (anchored on the real human recording)
+5. **Env-driven improvement**: feed the judge's feedback back into the agent's
+   prompt, re-run, and measure the lift (`+0.50` avg score, `+1` on human_likeness
+   in our run)
+
+
 ## Why VoiceEnv?
 
 Code LLMs have unit tests. Math LLMs have verifiable proofs. Voice LLMs have... vibes?

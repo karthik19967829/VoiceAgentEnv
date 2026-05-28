@@ -1,3 +1,39 @@
-ratings/
-voiceenv.egg-info/
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+voiceenv.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# Project artifacts
+ratings/
+~$*
+*.tmp
+
+# Large per-run artifacts (everything in environments/ is reproducible by running the pipeline;
+# the curated money-transfer env is mirrored on HF for distribution).
+environments/auto_*/ai_clips/
+environments/auto_*/ai_clips_v2/
+environments/auto_*/rollouts/
+
+# Slide decks etc. (not source)
+*.pptx
+~$*.pptx
+
+# Local logs
+*.log
+demo_results.json
+eval_results.json
+
+# OS
+.DS_Store

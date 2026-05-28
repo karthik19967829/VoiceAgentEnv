@@ -14,8 +14,10 @@ Commands:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -58,6 +60,276 @@ def list():
         )
 
     console.print(table)
+
+
+def _load_dotenv():
+    """Light .env loader so commands work without manually `source`-ing."""
+    env_file = Path(".env")
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+
+@cli.command()
+@click.argument("wav_path", type=click.Path(exists=True))
+@click.option("--env-dir", default=None,
+              help="Reuse an already-ingested env dir (skips ingest). Default: ingest fresh.")
+@click.option("--model", "-m", default="gpt-audio-mini",
+              help="Speech LLM under test (gpt-audio, gpt-audio-mini, etc.)")
+@click.option("--max-turns", default=8, help="Cap on caller turns to evaluate")
+@click.option("--parallelism", default=4, help="Concurrent API calls")
+@click.option("--grounded/--no-grounded", default=False,
+              help="Also run multimodal grounded judge (Gemini, ~+5s, ~$0.01)")
+@click.option("--judge-model", default="gemini-2.5-flash", help="Gemini model for grounded judge")
+@click.option("--output", "-o", default=None, help="Save JSON results here")
+def demo(wav_path: str, env_dir: str | None, model: str, max_turns: int,
+         parallelism: int, grounded: bool, judge_model: str, output: str | None):
+    """End-to-end speech-LLM demo from a single WAV.
+
+    Pipeline:
+      1. Auto-ingest the WAV into a VoiceEnv (or reuse --env-dir)
+      2. Slice the caller channel into per-turn audio clips
+      3. Run a STATELESS turn-level evaluation against the speech LLM
+         (each caller turn is an independent test case, parallelized)
+      4. Score AI responses with the env's verifiable rubric
+      5. Print a side-by-side scorecard (human vs AI per turn)
+    """
+    _load_dotenv()
+    from voiceenv.core.schema import VoiceEnvironment
+    from voiceenv.demo import slice_caller_turns, run_stateless_eval, run_grounded_eval, score_eval
+    from voiceenv.ingest.from_call import _load_hvb_transcript, _whisper_transcribe, _merge_consecutive
+
+    wav = Path(wav_path)
+
+    # ── 1. ingest (or load existing) ──
+    if env_dir:
+        env = VoiceEnvironment.from_yaml(Path(env_dir) / "env.yaml")
+        console.print(f"[cyan]Reusing existing env:[/cyan] {env.name}")
+    else:
+        from voiceenv.ingest import ingest_call
+        ingest_out = Path(f"environments/auto_{wav.stem[:8]}")
+        console.print(Panel.fit(
+            f"[bold cyan]VoiceEnv demo[/bold cyan]   "
+            f"[white]{wav.name}[/white]   →   model: [white]{model}[/white]",
+            border_style="cyan",
+        ))
+        console.print("[bold]Stage 1: autonomous ingest[/bold]")
+        result = ingest_call(
+            wav_path=wav, output_dir=ingest_out,
+            extraction_model="gpt-4o-mini",
+            on_log=lambda m: console.print(f"  [dim]{m}[/dim]"),
+        )
+        env = result.env
+        env_dir = str(ingest_out)
+        console.print(f"  [green]✓ env extracted:[/green] {env.name} "
+                      f"({len(env.tools)} tools, {len(env.rubric.all_criteria())} rubric criteria)")
+
+    # ── 2. rebuild turn list with timing (need it for slicing) ──
+    console.print("\n[bold]Stage 2: slice caller channel into per-turn clips[/bold]")
+    transcript_json = None
+    for up in (1, 2, 3):
+        try:
+            cand = wav.parents[up] / "transcript" / (wav.stem + ".json")
+            if cand.exists():
+                transcript_json = cand
+                break
+        except IndexError:
+            break
+
+    if transcript_json:
+        all_turns = _load_hvb_transcript(transcript_json)
+    else:
+        all_turns = _whisper_transcribe(wav)
+    all_turns = _merge_consecutive(all_turns)
+
+    clips_dir = Path(env_dir) / "caller_clips"
+    clips = slice_caller_turns(wav, all_turns, clips_dir, max_turns=max_turns)
+    console.print(f"  [green]✓ {len(clips)} caller turns sliced[/green] → {clips_dir}")
+
+    # ── 3. stateless eval ──
+    console.print(f"\n[bold]Stage 3: stateless eval against {model}[/bold]   "
+                  f"(parallel={parallelism})")
+    t0 = time.time()
+    ai_audio_dir = Path(env_dir) / "ai_clips"
+    results, cost = run_stateless_eval(
+        env, all_turns, clips, model=model, parallelism=parallelism,
+        on_log=lambda m: console.print(f"  [dim]{m}[/dim]"),
+        capture_audio=True,
+        audio_out_dir=ai_audio_dir,
+    )
+    wall = time.time() - t0
+
+    # ── 4a. score with verifiable rubric ──
+    console.print("\n[bold]Stage 4a: score with verifiable rubric (deterministic)[/bold]")
+    scorecard = score_eval(env, results)
+
+    # ── 4b. grounded multimodal judge (optional) ──
+    grounded_result = None
+    if grounded:
+        console.print(f"\n[bold]Stage 4b: grounded multimodal judge ({judge_model})[/bold]")
+        if not env.expert_references or not Path(env_dir, env.expert_references[0].audio_path).exists():
+            console.print("  [yellow]No expert reference audio found — skipping grounded judge.[/yellow]")
+        else:
+            expert_wav = str(Path(env_dir) / env.expert_references[0].audio_path)
+            console.print(f"  [dim]anchor: {expert_wav}[/dim]")
+            try:
+                grounded_result = run_grounded_eval(env, results, expert_wav, model=judge_model, all_turns=all_turns)
+                console.print(f"  [green]✓ avg score: {grounded_result['average_score_1_5']}/5[/green]")
+            except Exception as e:
+                console.print(f"  [red]✗ grounded judge failed: {e}[/red]")
+
+    # ── 5. report ──
+    summary = Table(title="Demo summary", show_header=True, header_style="bold green")
+    summary.add_column("Field", style="cyan")
+    summary.add_column("Value")
+    summary.add_row("Source WAV", wav.name)
+    summary.add_row("Env (auto-ingested)", env.name)
+    summary.add_row("Speech LLM", model)
+    summary.add_row("Turns evaluated", str(len(results)))
+    summary.add_row("Wall time", f"{wall:.1f}s ({len(results)} turns in parallel)")
+    summary.add_row("LLM cost", f"${cost:.4f}")
+    summary.add_row("Verifiable score", f"{scorecard.verifiable_score:.0%}")
+    summary.add_row("Total reward", f"{scorecard.total_score:.0%}")
+    if grounded_result:
+        summary.add_row("Grounded judge avg", f"{grounded_result['average_score_1_5']}/5")
+    console.print(summary)
+
+    if grounded_result:
+        gtable = Table(title=f"Grounded judge ({grounded_result['model']}) — anchored on real human call",
+                       show_header=True, header_style="bold magenta")
+        gtable.add_column("Dimension", style="cyan")
+        gtable.add_column("Score", justify="center")
+        gtable.add_column("Reasoning (vs human expert)", max_width=80, style="dim")
+        for dim, d in grounded_result["dimensions"].items():
+            score = d.get("score", 0)
+            color = "green" if score >= 4 else ("yellow" if score >= 3 else "red")
+            gtable.add_row(dim, f"[{color}]{score}/5[/{color}]", d.get("reasoning", ""))
+        console.print(gtable)
+
+    side = Table(title="Per-turn comparison: real human caller / human agent / AI agent",
+                 show_header=True, show_lines=True, header_style="bold magenta")
+    side.add_column("#", style="dim", width=3)
+    side.add_column("Caller (real audio in)", max_width=34, style="white")
+    side.add_column("Human agent baseline", max_width=34, style="green")
+    side.add_column(f"{model}", max_width=34, style="yellow")
+    for r in results:
+        ai = r.ai_response or ("✗ " + (r.error or "no response"))
+        if r.ai_tool_calls:
+            ai = ai + f"\n[bold cyan]→ {r.ai_tool_calls[0]['tool']}({json.dumps(r.ai_tool_calls[0]['args'])})[/bold cyan]"
+        side.add_row(str(r.turn_idx), r.caller_text or "(audio)",
+                     r.human_response or "—", ai)
+    console.print(side)
+
+    crit_table = Table(title="Verifiable rubric breakdown", show_header=True, header_style="bold blue")
+    crit_table.add_column("Criterion", style="cyan")
+    crit_table.add_column("Category")
+    crit_table.add_column("Pass", justify="center")
+    crit_table.add_column("Reasoning", max_width=60, style="dim")
+    for cr in scorecard.criteria_results:
+        crit_table.add_row(cr.name, cr.category,
+                           "[green]✓[/green]" if cr.score >= 0.5 else "[red]✗[/red]",
+                           cr.reasoning or "")
+    console.print(crit_table)
+
+    if output:
+        out_data = {
+            "env_name": env.name,
+            "model": model,
+            "wall_time_seconds": wall,
+            "cost_usd": cost,
+            "scorecard": {
+                "total_score": scorecard.total_score,
+                "verifiable_score": scorecard.verifiable_score,
+                "category_scores": scorecard.category_scores,
+            },
+            "grounded_judge": grounded_result,
+            "turns": [
+                {
+                    "turn_idx": r.turn_idx,
+                    "caller_text": r.caller_text,
+                    "caller_audio_path": r.caller_audio_path,
+                    "human_response": r.human_response,
+                    "ai_response": r.ai_response,
+                    "ai_tool_calls": r.ai_tool_calls,
+                    "latency_ms": r.latency_ms,
+                    "error": r.error,
+                }
+                for r in results
+            ],
+        }
+        Path(output).write_text(json.dumps(out_data, indent=2))
+        console.print(f"\n[green]Saved results to:[/green] {output}")
+
+
+@cli.command()
+@click.argument("wav_path", type=click.Path(exists=True))
+@click.option("--output", "-o", default=None,
+              help="Output directory (default: environments/<auto_name>)")
+@click.option("--transcript", "-t", default=None,
+              help="Optional sibling transcript JSON (HVB format). Auto-detected if absent.")
+@click.option("--model", "-m", default="gpt-4o-mini",
+              help="LLM used to extract task / persona / tools / rubric")
+def ingest(wav_path: str, output: str | None, transcript: str | None, model: str):
+    """Autonomously turn a real call recording (WAV) into a publishable VoiceEnv.
+
+    Pipeline: transcribe → segment → LLM extraction → schema build → emit.
+    Output is a self-contained directory with env.yaml + expert_reference/ + rollouts/
+    that can be passed straight to `voiceenv export` and `voiceenv publish`.
+    """
+    from voiceenv.ingest import ingest_call
+
+    # Auto-load .env if present
+    env_file = Path(".env")
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
+
+    if output is None:
+        output = f"environments/auto_{Path(wav_path).stem[:8]}"
+
+    console.print(Panel.fit(
+        f"[bold cyan]VoiceEnv autonomous ingest[/bold cyan]\n"
+        f"  source: [white]{wav_path}[/white]\n"
+        f"  output: [white]{output}[/white]\n"
+        f"  model:  [white]{model}[/white]",
+        border_style="cyan",
+    ))
+
+    result = ingest_call(
+        wav_path=wav_path,
+        output_dir=output,
+        transcript_path=transcript,
+        extraction_model=model,
+        on_log=lambda m: console.print(f"[dim]{m}[/dim]"),
+    )
+
+    total_ms = sum(result.timings_ms.values())
+
+    table = Table(title="Ingest result", show_header=True, header_style="bold green")
+    table.add_column("Field", style="cyan")
+    table.add_column("Value")
+    table.add_row("Environment name", result.env.name)
+    table.add_row("Vertical", result.env.vertical.value)
+    table.add_row("Difficulty", result.env.difficulty.value)
+    table.add_row("Tools", str(len(result.env.tools)))
+    table.add_row("Rubric criteria", str(len(result.env.rubric.all_criteria())))
+    table.add_row("Source turns", str(result.n_turns))
+    table.add_row("Source duration", f"{result.duration_seconds:.1f}s")
+    table.add_row("Total wall time", f"{total_ms / 1000:.1f}s")
+    table.add_row("LLM cost", f"${result.cost_usd:.4f}")
+    table.add_row("Output dir", str(result.output_dir))
+    console.print(table)
+
+    console.print(
+        f"\n[bold green]✓ Ready to publish.[/bold green] Next:\n"
+        f"  [cyan]voiceenv run {result.output_dir}/env.yaml -m gpt-4o-mini -n 5[/cyan]\n"
+        f"  [cyan]voiceenv export {result.output_dir}/env.yaml --target both[/cyan]\n"
+        f"  [cyan]voiceenv publish {result.output_dir}/env.yaml --target both[/cyan]\n"
+    )
 
 
 @cli.command()
@@ -377,6 +649,39 @@ def export(env_path: str, target: str, output: str):
         console.print(f"  Push with: [cyan]cd {mod_path} && prime env push[/cyan]")
 
 
+def _hf_upload_fallback(pkg_path: Path, env, repo_id: str | None):
+    """Fallback: push the OpenEnv package as a HuggingFace dataset repo using the
+    `huggingface_hub` SDK directly. Requires HUGGINGFACE_TOKEN or HF_TOKEN env var.
+    Cleaner than requiring the `openenv` CLI for a demo.
+    """
+    try:
+        from huggingface_hub import HfApi, create_repo
+    except ImportError:
+        console.print("[red]huggingface_hub not installed.[/red] pip install huggingface_hub")
+        return
+
+    token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
+    if not token:
+        console.print("[yellow]No HUGGINGFACE_TOKEN in env. Cannot push live.[/yellow]")
+        console.print(f"[dim]Package is at {pkg_path}. Set HUGGINGFACE_TOKEN and re-run.[/dim]")
+        return
+
+    api = HfApi(token=token)
+    user = api.whoami()["name"]
+    repo_id = repo_id or f"{user}/voiceenv-{env.name}"
+
+    console.print(f"[cyan]Creating repo {repo_id}...[/cyan]")
+    create_repo(repo_id, repo_type="dataset", token=token, exist_ok=True)
+    console.print(f"[cyan]Uploading {pkg_path}...[/cyan]")
+    api.upload_folder(
+        folder_path=str(pkg_path),
+        repo_id=repo_id,
+        repo_type="dataset",
+        commit_message=f"Auto-published VoiceEnv: {env.name}",
+    )
+    console.print(f"[bold green]✓ Live at: https://huggingface.co/datasets/{repo_id}[/bold green]")
+
+
 @cli.command()
 @click.argument("env_path")
 @click.option("--target", "-t", required=True,
@@ -390,6 +695,14 @@ def publish(env_path: str, target: str, repo_id: str | None, team: str | None):
 
     from voiceenv.core.schema import VoiceEnvironment
     from voiceenv.environments import load_environment
+
+    # Auto-load .env so HUGGINGFACE_TOKEN is available
+    env_file = Path(".env")
+    if env_file.exists():
+        for line in env_file.read_text().splitlines():
+            if "=" in line and not line.strip().startswith("#"):
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip())
 
     path = Path(env_path)
     if path.exists():
@@ -416,8 +729,8 @@ def publish(env_path: str, target: str, repo_id: str | None, team: str | None):
                     console.print(f"[yellow]openenv push output:[/yellow]\n{result.stderr or result.stdout}")
                     console.print(f"[dim]Package is at {pkg_path} — you can push manually.[/dim]")
             except FileNotFoundError:
-                console.print(f"[yellow]openenv CLI not found. Install with: pip install openenv-core[/yellow]")
-                console.print(f"Package exported to: {pkg_path}")
+                console.print(f"[yellow]openenv CLI not found — falling back to direct HuggingFace Hub upload.[/yellow]")
+                _hf_upload_fallback(pkg_path, env, repo_id)
 
         if target in ("prime", "both"):
             from voiceenv.exporters.prime_exporter import export_prime
@@ -899,6 +1212,22 @@ def cloud_rollouts(env_dir, agent_model, simulator_model, simulator_api_key,
     Path(output).write_text(rollouts_jsonl)
     n_lines = sum(1 for line in rollouts_jsonl.strip().split("\n") if line.strip())
     console.print(f"\n[green]Generated {n_lines} rollouts[/green] → {output}")
+
+
+@cli.command("ui")
+@click.option("--port", "-p", default=8911, type=int, help="Port to bind to")
+@click.option("--host", default="127.0.0.1", help="Host to bind to")
+def ui_cmd(port: int, host: str):
+    """Launch the live demo UI in a browser (single-page, streams pipeline)."""
+    _load_dotenv()
+    from voiceenv.ui.demo_app import run_demo_ui
+    console.print(Panel.fit(
+        f"[bold cyan]VoiceEnv demo UI[/bold cyan]\n"
+        f"  open: [white]http://{host}:{port}/[/white]\n"
+        f"  pick a sample, click Run, watch the pipeline stream live",
+        border_style="cyan",
+    ))
+    run_demo_ui(host=host, port=port)
 
 
 @cli.group()

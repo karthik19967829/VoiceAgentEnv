@@ -270,7 +270,19 @@ version: {{ env.version }}
 tags: {{ env.tags }}
 ''')
 
-README_TEMPLATE = Template('''# {{ env.name }}
+README_TEMPLATE = Template('''---
+title: {{ env.name }}
+emoji: 🎙️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+license: apache-2.0
+tags:
+{% for t in env.tags %}  - {{ t }}
+{% endfor %}---
+
+# {{ env.name }}
 
 {{ env.description }}
 

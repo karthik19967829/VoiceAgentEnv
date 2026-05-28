@@ -1,0 +1,315 @@
+name: banking_fraud_investigation
+description: >
+  A bank fraud analyst calls a customer to verify suspicious transactions on their
+  account. The agent must carefully authenticate the customer, investigate the flagged
+  transactions, determine if fraud occurred, and take appropriate action — without
+  revealing sensitive account details before verification or creating undue alarm.
+version: "1.0.0"
+author: voiceenv
+tags: [banking, fraud, authentication, security, compliance, investigation]
+vertical: support
+difficulty: hard
+languages: [en]
+
+task:
+  goal: >
+    Investigate 3 flagged transactions on the customer's account. Authenticate
+    the customer using security questions, determine which transactions are
+    legitimate vs fraudulent, and take appropriate protective action.
+  context: >
+    You are an AI fraud analyst for SecureBank. The fraud detection system flagged
+    3 transactions on this customer's debit card in the last 24 hours. You are making
+    an outbound call to verify. You must authenticate BEFORE discussing any details.
+  success_criteria:
+    - Customer authenticated via security questions
+    - All 3 flagged transactions individually verified with customer
+    - Fraudulent transactions identified and disputed
+    - Card blocked if fraud confirmed
+    - Case reference number provided to customer
+  failure_conditions:
+    - Revealed transaction details before authentication
+    - Failed to authenticate the customer
+    - Missed asking about one or more flagged transactions
+    - Gave specific account balance or full card number over the phone
+    - Failed to block card after confirmed fraud
+  terminal_conditions:
+    - All transactions verified and appropriate action taken
+    - Customer fails authentication (end call, direct to branch)
+    - Customer requests to call back on official number (acceptable)
+
+world_state:
+  description: Fraud detection alert context
+  fields:
+    customer_name: James Morrison
+    customer_phone: "555-0312"
+    last_four_card: "4821"
+    account_type: Premium Checking
+    security_question_1: "What is the name of your first pet?"
+    security_answer_1: "Biscuit"
+    security_question_2: "What street did you grow up on?"
+    security_answer_2: "Maple Drive"
+    flagged_transactions:
+      - id: TXN001
+        amount: "$847.99"
+        merchant: "ElectroMart Online"
+        location: "Internet Purchase"
+        time: "Yesterday 2:14 AM"
+        is_fraud: true
+      - id: TXN002
+        amount: "$12.50"
+        merchant: "Starbucks #4421"
+        location: "Portland, OR"
+        time: "Yesterday 7:22 AM"
+        is_fraud: false
+      - id: TXN003
+        amount: "$1,299.00"
+        merchant: "TravelBooker.net"
+        location: "Internet Purchase"
+        time: "Yesterday 11:48 PM"
+        is_fraud: true
+    total_flagged_amount: "$2,159.49"
+    fraud_amount: "$2,146.99"
+    case_reference: "FRD-2026-04-7821"
+
+simulator:
+  persona_description: >
+    James Morrison is a 45-year-old software engineer in Portland, OR. He's initially
+    suspicious of the call (worries it's a scam itself), so he'll test the agent by
+    asking how he can verify this is really his bank calling. Once satisfied, he's
+    cooperative. He recognizes the Starbucks charge (his morning coffee) but NOT the
+    ElectroMart or TravelBooker charges. He's alarmed when he realizes fraud occurred
+    and wants immediate action.
+  patience: 0.6
+  cooperativeness: 0.5
+  skepticism: 0.7
+  verbosity: 0.5
+  emotional_volatility: 0.4
+  dominance: 0.5
+  primary_language: en
+  formality: 0.5
+  filler_word_frequency: 0.3
+  interrupt_probability: 0.1
+  backchannel_frequency: 0.3
+  pause_tolerance_ms: 2000
+  topic_drift_probability: 0.05
+  hidden_goals:
+    - Verify this call is legitimate before giving any information
+    - Understand exactly which transactions are suspicious
+    - Get the fraudulent charges reversed immediately
+    - Know if his identity is compromised beyond just the card
+  scripted_triggers:
+    "agent asks security questions before explaining why they're calling": >
+      Wait, how do I even know this is really SecureBank? You could be a scammer.
+      Can you give me something that proves you're actually from my bank?
+    "agent mentions ElectroMart charge": >
+      ElectroMart? No, absolutely not. I've never even heard of that. That's not mine.
+      Eight hundred dollars? Are you serious?
+    "agent mentions TravelBooker charge": >
+      TravelBooker? No way. I'm not planning any trips. That's definitely not me either.
+      Oh god, is someone using my card?
+    "agent mentions Starbucks charge": >
+      Oh yeah, that's me. That's my morning coffee, I go there every day before work.
+    "agent suggests blocking the card": >
+      Yes, block it immediately. But wait — I have autopay set up for my mortgage
+      and utilities. Will those still go through?
+
+tools:
+  - name: verify_customer_identity
+    description: Verify customer by checking security question answers
+    parameters:
+      - name: question_number
+        type: integer
+        description: Which security question (1 or 2)
+        required: true
+      - name: customer_answer
+        type: string
+        description: The answer provided by the customer
+        required: true
+    side_effects:
+      customer_authenticated: true
+
+  - name: mark_transaction_status
+    description: Mark a flagged transaction as confirmed legitimate or confirmed fraud
+    parameters:
+      - name: transaction_id
+        type: string
+        description: Transaction ID (e.g. TXN001)
+        required: true
+      - name: status
+        type: string
+        enum: [confirmed_legitimate, confirmed_fraud, needs_investigation]
+        required: true
+      - name: customer_statement
+        type: string
+        description: What the customer said about this transaction
+        required: true
+    side_effects:
+      transaction_reviewed: true
+
+  - name: block_card
+    description: Immediately block the customer's debit card
+    parameters:
+      - name: reason
+        type: string
+        required: true
+      - name: issue_replacement
+        type: boolean
+        description: Whether to issue a replacement card
+        required: true
+    side_effects:
+      card_blocked: true
+
+  - name: create_dispute
+    description: File a formal fraud dispute for specified transactions
+    parameters:
+      - name: transaction_ids
+        type: string
+        description: Comma-separated transaction IDs to dispute
+        required: true
+      - name: total_amount
+        type: string
+        description: Total disputed amount
+        required: true
+    side_effects:
+      dispute_filed: true
+
+  - name: provide_case_reference
+    description: Give the customer their fraud case reference number
+    parameters:
+      - name: case_id
+        type: string
+        required: true
+      - name: next_steps
+        type: string
+        description: Brief explanation of what happens next
+        required: true
+
+rubric:
+  task_success:
+    - name: customer_authenticated
+      description: Agent verified customer identity before discussing account details
+      weight: 3.0
+      scoring_type: binary
+      deterministic_check: "state.get('customer_authenticated', False)"
+
+    - name: card_blocked_after_fraud
+      description: Agent blocked the card after fraud was confirmed
+      weight: 2.5
+      scoring_type: binary
+      deterministic_check: "state.get('card_blocked', False)"
+
+    - name: dispute_filed
+      description: Agent filed a formal dispute for the fraudulent transactions
+      weight: 2.5
+      scoring_type: binary
+      deterministic_check: "state.get('dispute_filed', False)"
+
+    - name: all_transactions_reviewed
+      description: Agent verified all 3 flagged transactions with the customer
+      weight: 2.0
+      scoring_type: binary
+      deterministic_check: "sum(1 for tc in tool_calls if tc.get('tool') == 'mark_transaction_status') >= 3"
+
+  compliance:
+    - name: no_details_before_auth
+      description: >
+        Agent did not reveal specific transaction amounts or merchants before
+        authentication was complete (checks that transaction details only appear
+        after verify_customer_identity was called)
+      weight: 3.0
+      scoring_type: binary
+      deterministic_check: >
+        tool_was_called('verify_customer_identity')
+
+    - name: no_full_card_number_shared
+      description: Agent never said the full card number over the phone
+      weight: 2.0
+      scoring_type: binary
+      deterministic_check: >
+        no_transcript_match(r'\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}', speaker='agent')
+
+    - name: no_account_balance_shared
+      description: Agent did not reveal account balance
+      weight: 1.5
+      scoring_type: binary
+      deterministic_check: >
+        no_transcript_match(r'(balance|total).{0,20}\$[\d,]+', speaker='agent')
+
+    - name: case_reference_provided
+      description: Agent gave the customer a case reference number
+      weight: 1.5
+      scoring_type: binary
+      deterministic_check: "tool_was_called('provide_case_reference')"
+
+  efficiency:
+    - name: resolved_under_15_turns
+      description: Investigation completed in 15 or fewer turns
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "turns <= 15"
+
+    - name: no_redundant_tool_calls
+      description: No tool called more than 3 times
+      weight: 1.0
+      scoring_type: binary
+      deterministic_check: "all(sum(1 for tc in tool_calls if tc.get('tool') == name) <= 3 for name in set(tc.get('tool') for tc in tool_calls))"
+
+  voice_quality:
+    - name: calm_professional_tone
+      description: Agent maintained calm, professional tone even when delivering alarming news
+      weight: 1.0
+      scoring_type: llm_judge
+
+    - name: clear_explanation
+      description: Agent clearly explained the situation and next steps without jargon
+      weight: 1.0
+      scoring_type: llm_judge
+
+  persona_fidelity:
+    - name: handled_customer_skepticism
+      description: Agent appropriately addressed customer's concern about call legitimacy
+      weight: 1.0
+      scoring_type: llm_judge
+
+    - name: empathy_during_fraud_discovery
+      description: Agent showed appropriate empathy when customer realized they were a fraud victim
+      weight: 1.0
+      scoring_type: llm_judge
+
+voice:
+  interaction_mode: turn_based
+  max_duration_seconds: 300
+  max_turns: 20
+  acceptable_response_latency_ms: 1200
+  good_response_latency_ms: 600
+
+agent_system_prompt: >
+  You are an AI fraud analyst for SecureBank, making an outbound call to verify
+  suspicious activity on a customer's account.
+
+  CUSTOMER: {customer_name}
+  CARD ENDING: {last_four_card}
+  ACCOUNT TYPE: {account_type}
+
+  FLAGGED TRANSACTIONS:
+  1. {flagged_transactions}
+
+  CASE REFERENCE: {case_reference}
+
+  SECURITY QUESTIONS:
+  Q1: {security_question_1} → Expected: {security_answer_1}
+  Q2: {security_question_2} → Expected: {security_answer_2}
+
+  CRITICAL RULES:
+  1. AUTHENTICATE FIRST. Do NOT discuss any transaction details until the customer
+     passes at least one security question.
+  2. Never share the full card number, account balance, or internal system details.
+  3. Go through each flagged transaction individually — ask if they recognize it.
+  4. If fraud is confirmed, block the card immediately and file a dispute.
+  5. Provide the case reference number before ending the call.
+  6. If the customer is suspicious this is a scam, offer to let them call back
+     on the number on their card. Don't be offended — it's smart security behavior.
+  7. Be calm and professional. Finding out you're a fraud victim is stressful.
+
+allow_benchmark: true
+allow_training: true

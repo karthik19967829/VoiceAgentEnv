@@ -248,6 +248,9 @@ class Scorer:
             "tool_was_called": lambda name, **kw: check_tool_was_called(tool_calls, name, **kw),
             "tool_args_valid": lambda name, arg, vals: check_tool_args_valid(tool_calls, name, arg, vals),
             "all_tools_succeeded": lambda: check_all_tools_succeeded(tool_calls),
+            # Safe builtins so deterministic_check expressions can use them
+            "len": len, "any": any, "all": all, "sum": sum, "min": min, "max": max,
+            "abs": abs, "int": int, "float": float, "str": str, "bool": bool,
         }
 
         for category, criteria in category_map.items():

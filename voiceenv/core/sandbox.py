@@ -51,7 +51,15 @@ class Sandbox:
             params = {}
             required = []
             for p in tool.parameters:
-                param_schema: dict[str, Any] = {"type": p.type, "description": p.description}
+                # Normalize Python-ish type names to JSON Schema types so
+                # OpenAI function-calling accepts them (e.g. "float" → "number").
+                _TYPE_MAP = {
+                    "float": "number", "int": "integer", "bool": "boolean",
+                    "str": "string", "list": "array", "dict": "object",
+                    "double": "number", "long": "integer",
+                }
+                ptype = _TYPE_MAP.get(p.type, p.type)
+                param_schema: dict[str, Any] = {"type": ptype, "description": p.description}
                 if p.enum:
                     param_schema["enum"] = p.enum
                 if p.default is not None:
