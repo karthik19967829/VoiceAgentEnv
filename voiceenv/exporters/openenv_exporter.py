@@ -357,13 +357,18 @@ def export_openenv(env: VoiceEnvironment, output_dir: str | Path) -> Path:
     # Environment YAML (the original spec)
     env.to_yaml(pkg_dir / "environment.yaml")
 
-    # Dockerfile
-    (server_dir / "Dockerfile").write_text(DOCKERFILE_TEMPLATE.render(**ctx))
+    # Dockerfile (must live at repo ROOT so HuggingFace Space picks it up
+    # and so the `COPY requirements.txt` resolves against the build context root)
+    (pkg_dir / "Dockerfile").write_text(DOCKERFILE_TEMPLATE.render(**ctx))
 
-    # requirements.txt
-    (server_dir / "requirements.txt").write_text(
+    # requirements.txt — also at repo ROOT for the same reason
+    requirements = (
         "openenv-core\nvoiceenv\nopenai>=1.0\npyyaml>=6.0\nhttpx>=0.25\n"
+        "uvicorn[standard]>=0.27\nfastapi>=0.110\n"
     )
+    (pkg_dir / "requirements.txt").write_text(requirements)
+    # Keep a copy under server/ for local `docker build server/` workflows too.
+    (server_dir / "requirements.txt").write_text(requirements)
 
     # pyproject.toml
     (pkg_dir / "pyproject.toml").write_text(PYPROJECT_TEMPLATE.render(**ctx))
