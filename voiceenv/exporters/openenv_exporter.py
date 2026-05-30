@@ -25,36 +25,35 @@ from voiceenv.core.schema import VoiceEnvironment
 
 MODELS_TEMPLATE = Template('''"""Auto-generated models for OpenEnv environment: {{ env.name }}"""
 
-from dataclasses import dataclass, field
 from typing import Any
+from pydantic import Field
 
 from openenv.core.env_server import Action, Observation, State
 
 
-@dataclass
+# openenv-core >= 0.3 uses Pydantic BaseModel for Action/Observation/State,
+# so subclasses must also be Pydantic models (not @dataclass).
 class VoiceAction(Action):
     """Agent action in the voice environment."""
     content: str = ""
-    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
 
 
-@dataclass
 class VoiceObservation(Observation):
     """Observation returned from the voice environment."""
     speaker: str = ""
     content: str = ""
-    tool_results: list[dict[str, Any]] = field(default_factory=list)
-    world_state: dict[str, Any] = field(default_factory=dict)
-    scores: dict[str, float] = field(default_factory=dict)
+    tool_results: list[dict[str, Any]] = Field(default_factory=list)
+    world_state: dict[str, Any] = Field(default_factory=dict)
+    scores: dict[str, float] = Field(default_factory=dict)
 
 
-@dataclass
 class VoiceState(State):
     """Episode state for the voice environment."""
     turn_count: int = 0
-    transcript: list[dict[str, str]] = field(default_factory=list)
-    tool_call_log: list[dict[str, Any]] = field(default_factory=list)
-    world_state: dict[str, Any] = field(default_factory=dict)
+    transcript: list[dict[str, str]] = Field(default_factory=list)
+    tool_call_log: list[dict[str, Any]] = Field(default_factory=list)
+    world_state: dict[str, Any] = Field(default_factory=dict)
     done_reason: str = ""
 ''')
 
@@ -203,13 +202,14 @@ from openenv.core.env_server import create_fastapi_app
 from ..models import VoiceAction, VoiceObservation
 from .environment import VoiceAgentEnvironment
 
-env = VoiceAgentEnvironment()
-app = create_fastapi_app(env, VoiceAction, VoiceObservation)
+# openenv-core >= 0.3 expects the environment CLASS (or factory), not an instance.
+app = create_fastapi_app(VoiceAgentEnvironment, VoiceAction, VoiceObservation)
 ''')
 
 CLIENT_TEMPLATE = Template('''"""Client for OpenEnv environment: {{ env.name }}"""
 
-from openenv.core import EnvClient, StepResult
+from openenv.core import EnvClient
+from openenv.core.client_types import StepResult
 
 from .models import VoiceAction, VoiceObservation, VoiceState
 
@@ -236,9 +236,10 @@ DOCKERFILE_TEMPLATE = Template('''FROM python:3.11-slim
 
 WORKDIR /app
 
-# git is required for pip git+https installs (e.g. installing voiceenv from
-# its public GitHub repo); ffmpeg is required for audio slicing at runtime.
-RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg \\
+# git → pip git+https installs (voiceenv from GitHub)
+# ffmpeg → audio slicing at runtime
+# curl → Docker HEALTHCHECK probe (slim image doesn't ship with it)
+RUN apt-get update && apt-get install -y --no-install-recommends git ffmpeg curl \\
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /tmp/requirements.txt
