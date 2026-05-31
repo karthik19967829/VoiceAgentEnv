@@ -197,6 +197,7 @@ class VoiceAgentEnvironment(Environment):
 
 APP_TEMPLATE = Template('''"""FastAPI app for OpenEnv environment: {{ env.name }}"""
 
+from fastapi.responses import HTMLResponse
 from openenv.core.env_server import create_fastapi_app
 
 from ..models import VoiceAction, VoiceObservation
@@ -204,6 +205,39 @@ from .environment import VoiceAgentEnvironment
 
 # openenv-core >= 0.3 expects the environment CLASS (or factory), not an instance.
 app = create_fastapi_app(VoiceAgentEnvironment, VoiceAction, VoiceObservation)
+
+
+_LANDING = """<!doctype html><html><head><meta charset='utf-8'>
+<title>VoiceEnv \xb7 {{ env.name }}</title>
+<style>body{font-family:-apple-system,system-ui,sans-serif;background:#0d1117;
+color:#e6edf3;margin:0;display:flex;align-items:center;justify-content:center;
+min-height:100vh;padding:28px}.c{max-width:720px;background:#161b22;
+border:1px solid #21262d;border-radius:12px;padding:28px 32px;line-height:1.55}
+h1{margin:0 0 8px;font-size:22px}.s{color:#8b949e;font-size:13px;margin-bottom:20px}
+a{color:#58a6ff;text-decoration:none;font-weight:500}a:hover{text-decoration:underline}
+code{background:#0d1117;border:1px solid #21262d;padding:2px 6px;border-radius:4px;
+font-size:12px;color:#d2a8ff}ul{padding-left:18px}li{margin:6px 0}
+.b{display:inline-block;padding:3px 10px;border-radius:999px;
+background:rgba(63,185,80,0.15);color:#3fb950;border:1px solid #3fb950;
+font-size:11px;margin-left:8px}pre{background:#0d1117;border:1px solid #21262d;
+border-radius:6px;padding:12px;font-size:12px;overflow-x:auto;color:#e6edf3}
+</style></head><body><div class='c'>
+<h1>VoiceEnv \xb7 {{ env.name }} <span class='b'>RUNNING</span></h1>
+<div class='s'>{{ env.description }}</div>
+<p><strong>Live API endpoints:</strong></p><ul>
+<li><a href='/docs'>/docs</a> \u2014 interactive Swagger UI</li>
+<li><a href='/health'>/health</a>, <a href='/metadata'>/metadata</a>,
+<a href='/schema'>/schema</a></li>
+<li><code>POST /reset</code>, <code>POST /step</code>, <code>GET /state</code>
+\u2014 OpenEnv RL loop</li></ul>
+<p><strong>Source:</strong>
+<a href='https://github.com/karthik19967829/VoiceAgentEnv'>github.com/karthik19967829/VoiceAgentEnv</a></p>
+</div></body></html>"""
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return HTMLResponse(_LANDING)
 ''')
 
 CLIENT_TEMPLATE = Template('''"""Client for OpenEnv environment: {{ env.name }}"""
