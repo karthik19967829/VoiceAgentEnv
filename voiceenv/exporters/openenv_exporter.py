@@ -59,6 +59,7 @@ class VoiceState(State):
 
 SERVER_TEMPLATE = Template('''"""Auto-generated OpenEnv server for: {{ env.name }}"""
 
+import os
 import json
 import uuid
 from pathlib import Path
@@ -71,6 +72,75 @@ from ..models import VoiceAction, VoiceObservation, VoiceState
 ENV_YAML = Path(__file__).parent.parent / "environment.yaml"
 
 
+class _ReplaySimulator:
+    """Deterministic simulator that replays the caller's turns from the
+    expert reference transcript stored in env.yaml. Requires no API key
+    and produces identical rollouts every time — ideal for the public
+    Space and benchmarking. Use the LLM-backed UserSimulator only when
+    you explicitly want diverse / OOD caller behavior at training time."""
+
+    def __init__(self, transcript: str):
+        self._caller_turns: list[str] = []
+        for raw in (transcript or "").splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            for prefix in ("caller:", "user:", "customer:"):
+                if line.lower().startswith(prefix):
+                    text = line[len(prefix):].strip()
+                    if text:
+                        self._caller_turns.append(text)
+                    break
+        self._idx = 0
+
+        class _S:
+            done = False
+            done_reason = ""
+        self.state = _S()
+
+    def reset(self) -> str:
+        self._idx = 0
+        self.state.done = False
+        self.state.done_reason = ""
+        if not self._caller_turns:
+            self.state.done = True
+            self.state.done_reason = "no_caller_turns_in_transcript"
+            return "[no caller turns]"
+        first = self._caller_turns[0]
+        self._idx = 1
+        return first
+
+    def respond(self, agent_text: str) -> str:
+        if self._idx >= len(self._caller_turns):
+            self.state.done = True
+            self.state.done_reason = "transcript_exhausted"
+            return "[end of call]"
+        out = self._caller_turns[self._idx]
+        self._idx += 1
+        if self._idx >= len(self._caller_turns):
+            self.state.done = True
+            self.state.done_reason = "transcript_exhausted"
+        return out
+
+
+def _build_simulator(env_spec):
+    """Pick a simulator. Default is deterministic replay (no API keys
+    required). Set VOICEENV_SIMULATOR=generative to opt into the
+    LLM-driven UserSimulator (then OPENAI_API_KEY must also be set)."""
+    mode = os.environ.get("VOICEENV_SIMULATOR", "replay").lower()
+    if mode == "generative" and os.environ.get("OPENAI_API_KEY"):
+        from voiceenv.core.simulator import UserSimulator
+        return UserSimulator(
+            profile=env_spec.simulator,
+            task=env_spec.task,
+            world_state=env_spec.world_state,
+        )
+    transcript = ""
+    if env_spec.expert_references:
+        transcript = env_spec.expert_references[0].transcript or ""
+    return _ReplaySimulator(transcript)
+
+
 class VoiceAgentEnvironment(Environment):
     """
     OpenEnv-compatible wrapper around a VoiceEnv environment.
@@ -80,8 +150,6 @@ class VoiceAgentEnvironment(Environment):
     def __init__(self):
         super().__init__()
         from voiceenv.core.schema import VoiceEnvironment as VE
-        from voiceenv.core.simulator import UserSimulator
-        from voiceenv.core.sandbox import Sandbox
 
         self._env_spec = VE.from_yaml(ENV_YAML)
         self._simulator = None
@@ -89,14 +157,9 @@ class VoiceAgentEnvironment(Environment):
         self._state = VoiceState()
 
     def reset(self) -> VoiceObservation:
-        from voiceenv.core.simulator import UserSimulator
         from voiceenv.core.sandbox import Sandbox
 
-        self._simulator = UserSimulator(
-            profile=self._env_spec.simulator,
-            task=self._env_spec.task,
-            world_state=self._env_spec.world_state,
-        )
+        self._simulator = _build_simulator(self._env_spec)
         self._sandbox = Sandbox(
             tools=self._env_spec.tools,
             initial_state=self._env_spec.world_state,
@@ -203,8 +266,18 @@ from openenv.core.env_server import create_fastapi_app
 from ..models import VoiceAction, VoiceObservation
 from .environment import VoiceAgentEnvironment
 
-# openenv-core >= 0.3 expects the environment CLASS (or factory), not an instance.
-app = create_fastapi_app(VoiceAgentEnvironment, VoiceAction, VoiceObservation)
+# openenv-core 0.3 calls the factory on every HTTP /reset and /step, which
+# would erase conversation state between requests. For a single-tenant
+# demo Space we hold one persistent env so /reset → /step → /step works
+# the way users (and the SDK over WebSocket) expect.
+_singleton = None
+def _env_factory():
+    global _singleton
+    if _singleton is None:
+        _singleton = VoiceAgentEnvironment()
+    return _singleton
+
+app = create_fastapi_app(_env_factory, VoiceAction, VoiceObservation)
 
 
 _LANDING = """<!doctype html><html><head><meta charset='utf-8'>
