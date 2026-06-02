@@ -649,60 +649,50 @@ def export(env_path: str, target: str, output: str):
         console.print(f"  Push with: [cyan]cd {mod_path} && prime env push[/cyan]")
 
 
-def _hf_upload_fallback(pkg_path: Path, env, repo_id: str | None):
-    """Fallback: push the OpenEnv package as a HuggingFace dataset repo using the
-    `huggingface_hub` SDK directly. Requires HUGGINGFACE_TOKEN or HF_TOKEN env var.
-    Cleaner than requiring the `openenv` CLI for a demo.
-    """
-    try:
-        from huggingface_hub import HfApi, create_repo
-    except ImportError:
-        console.print("[red]huggingface_hub not installed.[/red] pip install huggingface_hub")
-        return
-
-    token = os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
-    if not token:
-        console.print("[yellow]No HUGGINGFACE_TOKEN in env. Cannot push live.[/yellow]")
-        console.print(f"[dim]Package is at {pkg_path}. Set HUGGINGFACE_TOKEN and re-run.[/dim]")
-        return
-
-    api = HfApi(token=token)
-    user = api.whoami()["name"]
-    repo_id = repo_id or f"{user}/voiceenv-{env.name}"
-
-    console.print(f"[cyan]Creating repo {repo_id}...[/cyan]")
-    create_repo(repo_id, repo_type="dataset", token=token, exist_ok=True)
-    console.print(f"[cyan]Uploading {pkg_path}...[/cyan]")
-    api.upload_folder(
-        folder_path=str(pkg_path),
-        repo_id=repo_id,
-        repo_type="dataset",
-        commit_message=f"Auto-published VoiceEnv: {env.name}",
-    )
-    console.print(f"[bold green]✓ Live at: https://huggingface.co/datasets/{repo_id}[/bold green]")
-
-
-@cli.command()
-@click.argument("env_path")
-@click.option("--target", "-t", required=True,
-              type=click.Choice(["openenv", "prime", "both"]),
-              help="Target hub to publish to")
-@click.option("--repo-id", default=None, help="HuggingFace repo ID (for OpenEnv)")
-@click.option("--team", default=None, help="Team name (for Prime Intellect)")
-def publish(env_path: str, target: str, repo_id: str | None, team: str | None):
-    """Export and publish an environment to a hub in one step."""
-    import tempfile
-
-    from voiceenv.core.schema import VoiceEnvironment
-    from voiceenv.environments import load_environment
-
-    # Auto-load .env so HUGGINGFACE_TOKEN is available
+def _load_dotenv_for_publish() -> None:
     env_file = Path(".env")
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             if "=" in line and not line.strip().startswith("#"):
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip())
+
+
+@cli.command()
+@click.argument("env_path")
+@click.option("--target", "-t", default="openenv",
+              type=click.Choice(["openenv", "prime", "both"]),
+              help="Target hub (default: openenv → HuggingFace Spaces)")
+@click.option("--repo-id", default=None,
+              help="HF Space repo id, e.g. yourname/voiceenv-my-env "
+                   "(default: {you}/voiceenv-{env_name})")
+@click.option("--namespace", "-n", default=None,
+              help="HF namespace/org for default repo id (default: your username)")
+@click.option("--no-register", is_flag=True,
+              help="Skip adding this Space to the VoiceEnv hub collection")
+@click.option("--team", default=None, help="Team name (for Prime Intellect)")
+def publish(
+    env_path: str,
+    target: str,
+    repo_id: str | None,
+    namespace: str | None,
+    no_register: bool,
+    team: str | None,
+):
+    """Publish an environment to the VoiceEnv hub on HuggingFace (one command, no PR).
+
+    Creates an OpenEnv-compatible Docker Space and registers it in the public
+    VoiceEnv Environments collection.
+
+    Example:
+      voiceenv publish environments/auto_00d676d7/env.yaml
+    """
+    import tempfile
+
+    from voiceenv.core.schema import VoiceEnvironment
+    from voiceenv.environments import load_environment
+
+    _load_dotenv_for_publish()
 
     path = Path(env_path)
     if path.exists():
@@ -713,24 +703,31 @@ def publish(env_path: str, target: str, repo_id: str | None, team: str | None):
     with tempfile.TemporaryDirectory() as tmpdir:
         if target in ("openenv", "both"):
             from voiceenv.exporters.openenv_exporter import export_openenv
+            from voiceenv.exporters.hf_hub import push_openenv_space
+
             pkg_path = export_openenv(env, Path(tmpdir) / "openenv")
-            console.print(f"[green]OpenEnv package created[/green]")
+            console.print("[green]OpenEnv package created[/green]")
 
-            cmd = ["openenv", "push"]
-            if repo_id:
-                cmd.extend(["--repo-id", repo_id])
-
-            console.print(f"[cyan]Running: {' '.join(cmd)}[/cyan]")
             try:
-                result = subprocess.run(cmd, cwd=str(pkg_path), capture_output=True, text=True)
-                if result.returncode == 0:
-                    console.print(f"[green]Published to OpenEnv / HuggingFace![/green]")
-                else:
-                    console.print(f"[yellow]openenv push output:[/yellow]\n{result.stderr or result.stdout}")
-                    console.print(f"[dim]Package is at {pkg_path} — you can push manually.[/dim]")
-            except FileNotFoundError:
-                console.print(f"[yellow]openenv CLI not found — falling back to direct HuggingFace Hub upload.[/yellow]")
-                _hf_upload_fallback(pkg_path, env, repo_id)
+                result = push_openenv_space(
+                    pkg_path,
+                    env,
+                    repo_id=repo_id,
+                    register=not no_register,
+                    namespace=namespace,
+                )
+                console.print(f"[bold green]✓ Live Space:[/bold green] {result['space_url']}")
+                console.print(f"[dim]  App URL: {result['app_url']}[/dim]")
+                console.print(f"[dim]  Try: {result['app_url']}/docs[/dim]")
+                if result.get("hub_collection_url"):
+                    console.print(
+                        f"[bold green]✓ Listed in VoiceEnv hub:[/bold green] "
+                        f"{result['hub_collection_url']}"
+                    )
+            except Exception as e:
+                console.print(f"[red]Publish failed:[/red] {e}")
+                console.print(f"[dim]Package exported to {pkg_path} for manual push.[/dim]")
+                raise SystemExit(1) from e
 
         if target in ("prime", "both"):
             from voiceenv.exporters.prime_exporter import export_prime

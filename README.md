@@ -6,8 +6,35 @@ VoiceEnv is an open platform where the community creates voice agent environment
 
 ## Published artifacts
 
-- **HF Space (OpenEnv-compatible Docker)**: [karthik/voiceenv-money-transfer](https://huggingface.co/spaces/karthik/voiceenv-money-transfer)
-- **HF Dataset (env + expert audio + rollouts)**: [karthik/voiceenv-money-transfer](https://huggingface.co/datasets/karthik/voiceenv-money-transfer)
+- **VoiceEnv Hub (collection of runnable envs)**: publish with `voiceenv publish` — auto-listed
+- **Example env**: [karthik/voiceenv-money-transfer](https://huggingface.co/spaces/karthik/voiceenv-money-transfer) (OpenEnv Docker Space)
+
+## Contribute an environment (one command, no PR)
+
+```bash
+# 1. Create an env (from a real call or by hand)
+voiceenv ingest my_call.wav -o environments/my_env/
+
+# 2. Publish to the VoiceEnv hub on HuggingFace
+voiceenv publish environments/my_env/env.yaml
+```
+
+This creates an **OpenEnv-compatible Docker Space** (`reset` / `step` / `state`) and adds it to the public **VoiceEnv Environments Hub** collection on your HF profile. No maintainer approval, no PR to Meta.
+
+Optional flags:
+```bash
+voiceenv publish my_env/env.yaml --repo-id myorg/voiceenv-support-triage
+voiceenv publish my_env/env.yaml --namespace myorg        # default repo under org
+voiceenv publish my_env/env.yaml --no-register            # Space only, skip collection
+```
+
+Consumers connect with the standard OpenEnv SDK:
+```python
+from money_transfer import MoneyTransferEnv
+
+async with MoneyTransferEnv(base_url="https://karthik-voiceenv-money-transfer.hf.space") as client:
+    result = await client.reset()
+```
 
 ## 30-second demo
 
