@@ -28,6 +28,8 @@ app = FastAPI(title="VoiceEnv Demo")
 # Serve any audio file under the project root (we use absolute paths in messages).
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+from voiceenv.ui import showcase as _showcase  # noqa: E402
+
 
 def _load_dotenv():
     env_file = PROJECT_ROOT / ".env"
@@ -42,6 +44,14 @@ _load_dotenv()
 
 
 # ── Sample discovery ──
+
+
+@app.get("/api/mode")
+def api_mode():
+    return {
+        "showcase": _showcase.showcase_enabled(),
+        "live": not _showcase.showcase_enabled(),
+    }
 
 
 @app.get("/api/samples")
@@ -104,6 +114,16 @@ async def run_pipeline(
     grounded: bool = Query(True),
 ):
     """SSE stream that runs the full demo pipeline and emits per-stage updates."""
+
+    if _showcase.showcase_enabled():
+        async def gen_showcase() -> AsyncGenerator[bytes, None]:
+            async for chunk in _showcase.replay_sse("run_events.json"):
+                yield chunk
+
+        return StreamingResponse(gen_showcase(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
 
     async def gen() -> AsyncGenerator[bytes, None]:
         try:
@@ -306,6 +326,16 @@ async def improve_pipeline(wav: str = Query(...)):
     rewrite the agent's system prompt, then re-run eval + judge with it,
     and stream the deltas."""
 
+    if _showcase.showcase_enabled():
+        async def gen_showcase() -> AsyncGenerator[bytes, None]:
+            async for chunk in _showcase.replay_sse("improve_events.json"):
+                yield chunk
+
+        return StreamingResponse(gen_showcase(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
+
     async def gen() -> AsyncGenerator[bytes, None]:
         try:
             if wav not in _RUN_CACHE:
@@ -483,6 +513,11 @@ HTML = r"""<!doctype html>
 <header>
   <h1>VoiceEnv — Autonomous RL environment from a single WAV</h1>
   <p>Real call → ingest → speech-LLM eval → verifiable + grounded judging</p>
+  <p id="showcase-banner" class="hidden" style="margin-top:10px;padding:8px 12px;border-radius:6px;
+     background:rgba(88,166,255,0.12);border:1px solid var(--accent);font-size:12.5px;color:var(--fg);">
+    <strong>Interactive replay</strong> — pre-recorded from a real banking call (no API keys).
+    <a href="https://github.com/karthik19967829/VoiceAgentEnv" style="color:var(--accent);">GitHub</a>
+  </p>
 </header>
 
 <main>
@@ -585,6 +620,9 @@ async function loadSamples() {
   }
 }
 loadSamples();
+fetch("/api/mode").then(r => r.json()).then(m => {
+  if (m.showcase) el("showcase-banner").classList.remove("hidden");
+});
 
 function setStage(name, status) {
   let s = document.querySelector(`.stage[data-name="${name}"]`);
@@ -848,6 +886,6 @@ def index():
     return HTMLResponse(HTML)
 
 
-def run_demo_ui(host: str = "127.0.0.1", port: int = 8911):
+def run_demo_ui(host: str = "0.0.0.0", port: int = 8911):
     import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="info")

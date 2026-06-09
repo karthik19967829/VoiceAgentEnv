@@ -1227,6 +1227,21 @@ def ui_cmd(port: int, host: str):
     run_demo_ui(host=host, port=port)
 
 
+@cli.command("publish-demo")
+@click.option("--repo-id", default="karthik/voiceenv-demo", help="HF Space repo id")
+def publish_demo_cmd(repo_id: str):
+    """Publish the shareable talk demo (interactive replay) to Hugging Face Spaces."""
+    from voiceenv.exporters.demo_hub import push_demo_space
+
+    url = push_demo_space(repo_id)
+    console.print(Panel.fit(
+        f"[bold green]Demo Space published[/bold green]\n"
+        f"  share: [white]{url}[/white]\n"
+        f"  (interactive replay — no API keys)",
+        border_style="green",
+    ))
+
+
 @cli.group()
 def judge():
     """Judge validation — rate runs, compute correlation, build trust."""

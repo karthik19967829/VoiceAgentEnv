@@ -1,0 +1,434 @@
+[
+  {
+    "event": "stage",
+    "data": {
+      "stage": "start",
+      "wav": "hvb_samples/audio/agent/00d676d7058c49bb.wav"
+    },
+    "delay_ms": 65
+  },
+  {
+    "event": "log",
+    "data": {
+      "stage": "ingest",
+      "msg": "Autonomous ingest: transcribing + extracting\u2026"
+    },
+    "delay_ms": 0
+  },
+  {
+    "event": "env",
+    "data": {
+      "name": "money_transfer",
+      "description": "A call where a customer requests to transfer money between accounts.",
+      "vertical": "support",
+      "difficulty": "easy",
+      "n_turns": 13,
+      "duration_seconds": 52.4,
+      "n_tools": 1,
+      "n_criteria": 4,
+      "ingest_cost_usd": 0.0006382499999999999,
+      "ingest_seconds": 18.1,
+      "task_goal": "Assist the caller in transferring money between their accounts. Ensure the transfer is completed successfully.",
+      "persona": "The caller is a polite and straightforward individual seeking assistance with a money transfer.",
+      "tools": [
+        {
+          "name": "transfer_money",
+          "description": "Transfers a specified amount from one account to another."
+        }
+      ],
+      "criteria": [
+        {
+          "name": "transfer_completed",
+          "category": "task_success",
+          "check": "any(tc['tool'] == 'transfer_money' and tc['success'] for tc in tool_calls)"
+        },
+        {
+          "name": "caller_satisfaction",
+          "category": "task_success",
+          "check": "transcript_contains('thank you', speaker='caller')"
+        },
+        {
+          "name": "greeting_provided",
+          "category": "compliance",
+          "check": "transcript_contains('hello', speaker='agent')"
+        },
+        {
+          "name": "turns_limit",
+          "category": "efficiency",
+          "check": "turns <= 10"
+        }
+      ],
+      "expert_audio_url": "/audio?path=environments/auto_00d676d7/expert_reference/source_call.wav"
+    },
+    "delay_ms": 800
+  },
+  {
+    "event": "log",
+    "data": {
+      "stage": "slice",
+      "msg": "Slicing real caller audio per turn\u2026"
+    },
+    "delay_ms": 0
+  },
+  {
+    "event": "clips",
+    "data": {
+      "n_clips": 6,
+      "clips": [
+        {
+          "turn_idx": 1,
+          "text": "hi my name is robert johnson i would like to transfer money between my accounts",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_01.wav",
+          "duration_ms": 4290
+        },
+        {
+          "turn_idx": 3,
+          "text": "uh the amount is one hundred and thirty five dollars",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_03.wav",
+          "duration_ms": 3120
+        },
+        {
+          "turn_idx": 5,
+          "text": "savings",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_05.wav",
+          "duration_ms": 720
+        },
+        {
+          "turn_idx": 7,
+          "text": "checking",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_07.wav",
+          "duration_ms": 480
+        },
+        {
+          "turn_idx": 9,
+          "text": "no thank you",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_09.wav",
+          "duration_ms": 690
+        },
+        {
+          "turn_idx": 11,
+          "text": "you too bye bye",
+          "audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_11.wav",
+          "duration_ms": 990
+        }
+      ]
+    },
+    "delay_ms": 616
+  },
+  {
+    "event": "log",
+    "data": {
+      "stage": "eval",
+      "msg": "Running stateless eval with gpt-audio-mini (parallel)\u2026"
+    },
+    "delay_ms": 0
+  },
+  {
+    "event": "eval",
+    "data": {
+      "model": "gpt-audio-mini",
+      "n_turns": 6,
+      "wall_seconds": 4.39,
+      "cost_usd": 0.0404,
+      "turns": [
+        {
+          "turn_idx": 1,
+          "caller_text": "hi my name is robert johnson i would like to transfer money between my accounts",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_01.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            }
+          ],
+          "human_response": "oh sure i can help you with that uh what is the transfer amount",
+          "human_response_audio_url": "/audio?path=environments/auto_00d676d7/human_response_clips/human_response_01.wav",
+          "ai_response": "Hi Robert, I\u2019d be happy to help. Could you tell me the amount you\u2019d like to transfer and which accounts we\u2019re transferring between?",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_01.wav",
+          "ai_tool_calls": [],
+          "latency_ms": 2351,
+          "error": null
+        },
+        {
+          "turn_idx": 3,
+          "caller_text": "uh the amount is one hundred and thirty five dollars",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_03.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            },
+            {
+              "role": "user",
+              "text": "hi my name is robert johnson i would like to transfer money between my accounts"
+            },
+            {
+              "role": "agent",
+              "text": "oh sure i can help you with that uh what is the transfer amount"
+            }
+          ],
+          "human_response": "okay what is the source of the account",
+          "human_response_audio_url": "/audio?path=environments/auto_00d676d7/human_response_clips/human_response_03.wav",
+          "ai_response": "Got it. Could you tell me from which account the money will be transferred, and to which account?",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_03.wav",
+          "ai_tool_calls": [],
+          "latency_ms": 2187,
+          "error": null
+        },
+        {
+          "turn_idx": 5,
+          "caller_text": "savings",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_05.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            },
+            {
+              "role": "user",
+              "text": "hi my name is robert johnson i would like to transfer money between my accounts"
+            },
+            {
+              "role": "agent",
+              "text": "oh sure i can help you with that uh what is the transfer amount"
+            },
+            {
+              "role": "user",
+              "text": "uh the amount is one hundred and thirty five dollars"
+            },
+            {
+              "role": "agent",
+              "text": "okay what is the source of the account"
+            }
+          ],
+          "human_response": "and what is the destination account",
+          "human_response_audio_url": "/audio?path=environments/auto_00d676d7/human_response_clips/human_response_05.wav",
+          "ai_response": "Thank you. And what\u2019s the destination account\u2019s name?",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_05.wav",
+          "ai_tool_calls": [],
+          "latency_ms": 1466,
+          "error": null
+        },
+        {
+          "turn_idx": 7,
+          "caller_text": "checking",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_07.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            },
+            {
+              "role": "user",
+              "text": "hi my name is robert johnson i would like to transfer money between my accounts"
+            },
+            {
+              "role": "agent",
+              "text": "oh sure i can help you with that uh what is the transfer amount"
+            },
+            {
+              "role": "user",
+              "text": "uh the amount is one hundred and thirty five dollars"
+            },
+            {
+              "role": "agent",
+              "text": "okay what is the source of the account"
+            },
+            {
+              "role": "user",
+              "text": "savings"
+            },
+            {
+              "role": "agent",
+              "text": "and what is the destination account"
+            }
+          ],
+          "human_response": "okay so uh one hundred and thirty five dollars has been transferred from your savings account to your checking account is there anything else i can help you with",
+          "human_response_audio_url": "/audio?path=environments/auto_00d676d7/human_response_clips/human_response_07.wav",
+          "ai_response": "The transfer of 135 dollars from your savings to checking is complete.",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_07.wav",
+          "ai_tool_calls": [
+            {
+              "tool": "transfer_money",
+              "args": {
+                "source_account": "savings",
+                "destination_account": "checking",
+                "amount": 135
+              },
+              "success": true
+            }
+          ],
+          "latency_ms": 912,
+          "error": null
+        },
+        {
+          "turn_idx": 9,
+          "caller_text": "no thank you",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_09.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            },
+            {
+              "role": "user",
+              "text": "hi my name is robert johnson i would like to transfer money between my accounts"
+            },
+            {
+              "role": "agent",
+              "text": "oh sure i can help you with that uh what is the transfer amount"
+            },
+            {
+              "role": "user",
+              "text": "uh the amount is one hundred and thirty five dollars"
+            },
+            {
+              "role": "agent",
+              "text": "okay what is the source of the account"
+            },
+            {
+              "role": "user",
+              "text": "savings"
+            },
+            {
+              "role": "agent",
+              "text": "and what is the destination account"
+            },
+            {
+              "role": "user",
+              "text": "checking"
+            },
+            {
+              "role": "agent",
+              "text": "okay so uh one hundred and thirty five dollars has been transferred from your savings account to your checking account is there anything else i can help you with"
+            }
+          ],
+          "human_response": "thank you for calling have a great day",
+          "human_response_audio_url": "/audio?path=environments/auto_00d676d7/human_response_clips/human_response_09.wav",
+          "ai_response": "The transfer of $135 from your savings to your checking account is complete.",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_09.wav",
+          "ai_tool_calls": [
+            {
+              "tool": "transfer_money",
+              "args": {
+                "source_account": "savings",
+                "destination_account": "checking",
+                "amount": 135
+              },
+              "success": true
+            }
+          ],
+          "latency_ms": 1088,
+          "error": null
+        },
+        {
+          "turn_idx": 11,
+          "caller_text": "you too bye bye",
+          "caller_audio_url": "/audio?path=environments/auto_00d676d7/caller_clips/caller_turn_11.wav",
+          "prior_context": [
+            {
+              "role": "agent",
+              "text": "hello this is happy valley national bank my name is jennifer how can i help you today"
+            },
+            {
+              "role": "user",
+              "text": "hi my name is robert johnson i would like to transfer money between my accounts"
+            },
+            {
+              "role": "agent",
+              "text": "oh sure i can help you with that uh what is the transfer amount"
+            },
+            {
+              "role": "user",
+              "text": "uh the amount is one hundred and thirty five dollars"
+            },
+            {
+              "role": "agent",
+              "text": "okay what is the source of the account"
+            },
+            {
+              "role": "user",
+              "text": "savings"
+            },
+            {
+              "role": "agent",
+              "text": "and what is the destination account"
+            },
+            {
+              "role": "user",
+              "text": "checking"
+            },
+            {
+              "role": "agent",
+              "text": "okay so uh one hundred and thirty five dollars has been transferred from your savings account to your checking account is there anything else i can help you with"
+            },
+            {
+              "role": "user",
+              "text": "no thank you"
+            },
+            {
+              "role": "agent",
+              "text": "thank you for calling have a great day"
+            }
+          ],
+          "human_response": "bye",
+          "human_response_audio_url": null,
+          "ai_response": "Take care, bye for now!",
+          "ai_audio_url": "/audio?path=environments/auto_00d676d7/ai_clips/ai_turn_11.wav",
+          "ai_tool_calls": [],
+          "latency_ms": 1051,
+          "error": null
+        }
+      ]
+    },
+    "delay_ms": 800
+  },
+  {
+    "event": "log",
+    "data": {
+      "stage": "grounded",
+      "msg": "Grounded judge (Gemini, multimodal)\u2026"
+    },
+    "delay_ms": 0
+  },
+  {
+    "event": "grounded",
+    "data": {
+      "model": "gemini-2.5-flash",
+      "expert_reference": "/Users/karthikganesan/Desktop/VoiceAgentEnv/environments/auto_00d676d7/expert_reference/source_call.wav",
+      "average_score_1_5": 3.17,
+      "dimensions": {
+        "human_likeness": {
+          "score": 3,
+          "reasoning": "The initial interactions are natural, but the AI's confirmation in turn 7 is a bit abrupt compared to the human, and repeating the transfer confirmation in turn 9 after the caller said 'no thank you' is not human-like."
+        },
+        "tone_appropriateness": {
+          "score": 4,
+          "reasoning": "The AI maintains a consistently professional and polite tone throughout the conversation, which is appropriate for a banking support call."
+        },
+        "empathy": {
+          "score": 3,
+          "reasoning": "The AI offers help initially with 'I\u2019d be happy to help,' but is otherwise mostly neutral and task-focused, missing an opportunity to acknowledge the caller's 'no thank you' in turn 9."
+        },
+        "task_focus": {
+          "score": 3,
+          "reasoning": "The AI efficiently gathers information and correctly executes the transfer in turn 7, but the repetition of the transfer confirmation in turn 9 instead of moving to call closure indicates a misinterpretation of the conversational state."
+        },
+        "conciseness": {
+          "score": 3,
+          "reasoning": "The AI is generally concise in its information gathering and confirmation, but the repetition of the transfer confirmation in turn 9 makes that specific turn less concise than a human would be."
+        },
+        "tool_appropriateness": {
+          "score": 3,
+          "reasoning": "The tool was correctly identified and called in Turn 7 when all information was available. However, calling the same tool again in Turn 9 after the caller indicated no further assistance was needed is inappropriate, as it implies re-executing an already completed action."
+        }
+      }
+    },
+    "delay_ms": 800
+  },
+  {
+    "event": "done",
+    "data": {},
+    "delay_ms": 0
+  }
+]
